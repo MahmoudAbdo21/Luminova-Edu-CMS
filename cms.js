@@ -1473,8 +1473,8 @@
                             <h3 className="text-2xl sm:text-4xl font-black text-brand-DEFAULT shrink-0">${Luminova.i18n[lang][activeTab] || activeTab}</h3>
                             ${!editingItem && html`
                                 <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto sm:flex-1 sm:max-w-lg sm:justify-end items-stretch">
-                                    <input type="text" placeholder=${lang === 'ar' ? 'بحث سريع...' : 'Quick Search...'} value=${cmsSearchQuery} onChange=${e => setCmsSearchQuery(e.target.value)} className="w-full sm:flex-1 p-3 sm:p-4 rounded-full bg-white dark:bg-gray-800 border-2 dark:border-gray-700 focus:border-brand-DEFAULT outline-none shadow-sm font-bold placeholder:opacity-50 text-sm sm:text-base" />
-                                    <${Luminova.Components.Button} onClick=${() => setEditingItem(getNewTemplate())} className="text-base sm:text-xl px-6 sm:px-10 py-3 sm:py-4 rounded-full shadow-lg shadow-brand-DEFAULT/30 hover:shadow-brand-DEFAULT/50 transition-all font-black shrink-0 justify-center">
+                                    <input type="text" placeholder=${lang === 'ar' ? 'بحث في هذا القسم...' : 'Search in this section...'} value=${cmsSearchQuery} onChange=${e => setCmsSearchQuery(e.target.value)} className="w-full sm:flex-1 p-3 sm:p-4 rounded-2xl backdrop-blur-lg bg-white/40 dark:bg-slate-800/50 border border-white/20 dark:border-slate-700/50 focus:border-brand-DEFAULT focus:shadow-[0_0_15px_rgba(6,182,212,0.4)] outline-none shadow-sm font-bold placeholder:opacity-50 text-sm sm:text-base transition-all" />
+                                    <${Luminova.Components.Button} onClick=${() => setEditingItem(getNewTemplate())} className="text-base sm:text-xl px-6 sm:px-10 py-3 sm:py-4 rounded-2xl bg-gradient-to-r from-brand-DEFAULT to-brand-hover hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-black shrink-0 justify-center border-none">
                                         ${lang === 'ar' ? '+ إضافة جديد' : '+ Add New'}
                                     </${Luminova.Components.Button}>
                                 </div>
@@ -1830,31 +1830,79 @@
                             </div>
                         ` : html`
                             <div className="p-2 sm:p-4 space-y-3">
-                                ${displayedTableItems.map(item => html`
-                                    <div key=${item.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-100 dark:border-gray-700/30 hover:border-brand-DEFAULT/30 hover:shadow-md transition-all">
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-xs font-mono text-gray-400 mb-1 truncate">${item.id}</div>
-                                            <div className="font-bold text-base sm:text-lg">
-                                                ${item.titleAr || item.nameAr || item.name || item.titleEn || item.nameEn || item.title || 'N/A'}
-                                                ${(item.titleEn || item.nameEn) ? html`<span className="text-gray-400 font-normal text-sm mx-1">-</span><span className="opacity-60 text-sm font-normal">${item.titleEn || item.nameEn || ''}</span>` : null}
-                                                ${item.isVIP && html`<span className="ml-1 text-brand-DEFAULT">✨</span>`}
-                                                ${item.isFeatured && html`<span className="ml-1 text-brand-gold">📌</span>`}
-                                                ${item.isVerified && html`<span className="ml-1">🔵✔️</span>`}
-                                                ${item.role === 'doctor' && html`<span className="ml-1 text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full font-black">🎓</span>`}
-                                            </div>
-                                            <div className="text-xs text-gray-400 mt-1 font-semibold">${Luminova.formatDate(item.timestamp, lang)}</div>
+                                    ${displayedTableItems.map(item => {
+                                    const subject = data.subjects?.find(s => s.id === item.subjectId);
+                                    const year = activeTab === 'semesters' ? data.years?.find(y => y.id === item.yearId) : null;
+                                    const subjectSemester = activeTab === 'subjects' ? data.semesters?.find(s => s.id === item.semesterId) : null;
+                                    const subjectYear = subjectSemester ? data.years?.find(y => y.id === subjectSemester.yearId) : null;
+                                    const authorId = item.studentId || item.publisherId || item.senderId;
+                                    const author = Luminova.getStudent(authorId, data.students);
+                                    const categoryLabel = Luminova.i18n[lang][activeTab] || activeTab;
+
+                                    return html`
+                                    <div key=${item.id} className="group relative flex flex-col sm:flex-row sm:items-center gap-4 p-5 backdrop-blur-lg bg-white/40 dark:bg-slate-800/50 rounded-2xl border border-white/20 dark:border-slate-700/50 hover:border-brand-DEFAULT/50 hover:shadow-[0_0_20px_rgba(6,182,212,0.15)] dark:hover:shadow-[0_0_30px_rgba(6,182,212,0.1)] transition-all duration-300">
+                                        <!-- Category Badge -->
+                                        <div className="absolute -top-3 start-4 px-3 py-1 rounded-full bg-gradient-to-r from-brand-DEFAULT to-brand-hover text-white text-[10px] font-black uppercase tracking-wider shadow-lg z-10">
+                                            ${categoryLabel}
                                         </div>
-                                        <div className="flex gap-2 shrink-0 justify-end">
+
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <span className="text-[10px] font-mono text-gray-400 bg-gray-100 dark:bg-gray-900/50 px-2 py-0.5 rounded-md">${item.id}</span>
+                                                <span className="text-[10px] text-gray-400 font-semibold">${Luminova.formatDate(item.timestamp, lang)}</span>
+                                            </div>
+                                            
+                                            <div className="font-black text-lg sm:text-xl text-gray-900 dark:text-white leading-tight mb-2">
+                                                ${item.titleAr || item.nameAr || item.name || item.titleEn || item.nameEn || item.title || 'N/A'}
+                                                ${item.isVIP && html`<span className="ms-2 text-brand-DEFAULT animate-pulse">✨</span>`}
+                                                ${item.isFeatured && html`<span className="ms-2 text-brand-gold">📌</span>`}
+                                                ${item.isVerified && html`<span className="ms-2 text-blue-500">🔵✔️</span>`}
+                                                ${item.role === 'doctor' && html`<span className="ms-2 text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full font-black">🎓</span>`}
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-2 mt-3">
+                                                ${subjectYear && subjectSemester && html`
+                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
+                                                        <span className="opacity-60">${lang === 'ar' ? 'الفرقة:' : 'Year:'}</span>
+                                                        <span>${subjectYear.nameAr || subjectYear.name}</span>
+                                                        <span className="opacity-30 mx-1">|</span>
+                                                        <span className="opacity-60">${lang === 'ar' ? 'الترم:' : 'Semester:'}</span>
+                                                        <span>${subjectSemester.nameAr || subjectSemester.name}</span>
+                                                    </div>
+                                                `}
+                                                ${year && html`
+                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
+                                                        <span className="opacity-60">${lang === 'ar' ? 'الفرقة:' : 'Year:'}</span>
+                                                        <span>${year.nameAr || year.name}</span>
+                                                    </div>
+                                                `}
+                                                ${subject && html`
+                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
+                                                        <span className="opacity-60">${lang === 'ar' ? 'المادة:' : 'Subject:'}</span>
+                                                        <span>${subject.nameAr || subject.name}</span>
+                                                    </div>
+                                                `}
+                                                ${author && author.id !== 'unknown' && html`
+                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-gold/10 border border-brand-gold/20 text-brand-gold text-xs font-bold">
+                                                        <span className="opacity-60">${lang === 'ar' ? 'الكاتب:' : 'Author:'}</span>
+                                                        <span>${author.nameAr || author.name}</span>
+                                                    </div>
+                                                `}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-2 shrink-0 justify-end mt-4 sm:mt-0">
                                             ${activeTab === 'quizzes' && html`
-                                                <button onClick=${() => { setEditingItem({ ...item }); setSubView('questionsList'); }} className="px-3 py-2 bg-brand-DEFAULT/10 text-brand-DEFAULT rounded-xl hover:bg-brand-DEFAULT hover:text-white transition-colors font-bold text-sm flex gap-1 items-center border border-brand-DEFAULT/20">
-                                                    📝 <span className="bg-white/50 dark:bg-black/20 text-xs px-1.5 py-0.5 rounded-full">${(item.questions || []).length}</span>
+                                                <button onClick=${() => { setEditingItem({ ...item }); setSubView('questionsList'); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 text-indigo-500 rounded-xl hover:bg-indigo-500 hover:text-white transition-all font-black text-sm border border-indigo-500/20 shadow-sm">
+                                                    <span>📝</span>
+                                                    <span className="bg-indigo-500/20 px-2 py-0.5 rounded-full text-[10px]">${(item.questions || []).length}</span>
                                                 </button>
                                             `}
-                                            <button onClick=${() => setEditingItem({ ...item })} className="p-2.5 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-white transition-colors"><${Luminova.Icons.Edit} /></button>
-                                            <button onClick=${() => handleDelete(activeTab, item.id)} className="p-2.5 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-colors"><${Luminova.Icons.Trash} /></button>
+                                            <button onClick=${() => setEditingItem({ ...item })} className="p-3 bg-brand-DEFAULT/10 text-brand-DEFAULT rounded-xl hover:bg-brand-DEFAULT hover:text-white hover:shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-all border border-brand-DEFAULT/20" title="Edit"><${Luminova.Icons.Edit} /></button>
+                                            <button onClick=${() => handleDelete(activeTab, item.id)} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white hover:shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all border border-red-500/20" title="Delete"><${Luminova.Icons.Trash} /></button>
                                         </div>
                                     </div>
-                                `)}
+                                    `})}
                                 ${activeTableItems.length === 0 && html`
                                     <div className="p-12 sm:p-20 text-center font-bold text-xl sm:text-2xl opacity-30 border-2 border-dashed rounded-3xl">${Luminova.i18n[lang].emptyState}</div>
                                 `}
@@ -2022,7 +2070,7 @@
         <div className="min-h-screen relative bg-slate-50 dark:bg-slate-950">
             <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,rgba(6,182,212,0.04),transparent_50%)] pointer-events-none z-0"></div>
             ${loginState.role === 'editor' && html`
-                <div className="fixed top-4 end-4 z-50 flex items-center gap-2 bg-amber-500/90 backdrop-blur-xl text-black px-4 py-2 rounded-full shadow-lg shadow-amber-500/20 font-black text-xs sm:text-sm cursor-default group" title="Blind Addition Mode: You can only add new items. Existing data is hidden.">
+                <div className="fixed bottom-4 start-4 z-50 flex items-center gap-2 bg-amber-500/90 backdrop-blur-xl text-black px-4 py-2 rounded-full shadow-lg shadow-amber-500/20 font-black text-xs sm:text-sm cursor-default group" title="Blind Addition Mode: You can only add new items. Existing data is hidden.">
                     <span className="text-lg">👁️‍🗨️</span>
                     <span className="hidden sm:inline">EDITOR MODE</span>
                     <span className="w-2 h-2 bg-black/30 rounded-full animate-pulse"></span>
