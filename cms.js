@@ -2,9 +2,9 @@
     "use strict";
 
     // --- HARDCODED GITHUB URLS ---
-    const DATA_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/2daa2ef06d410a633d01817e2cf33cd1cfa115e1/data.js";
-    const EXAM_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/2daa2ef06d410a633d01817e2cf33cd1cfa115e1/exam.js";
-    const CERTS_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/2daa2ef06d410a633d01817e2cf33cd1cfa115e1/certificates.js";
+    const DATA_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/data.js";
+    const EXAM_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/exam.js";
+    const CERTS_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/certificates.js";
 
     // ==========================================
     // PART 1: Core Utilities, i18n, Icons, Atoms
@@ -41,7 +41,8 @@
             logout: "خروج الإدارة", passwordPrompt: "أدخل كلمة سر الإدارة:", wrongPassword: "كلمة السر خاطئة!",
             major: "التخصص", correct: "إجابة صحيحة", wrong: "إجابة خاطئة", results: "النتائج",
             topContributors: "شرف المساهمين 🏆", news: "أحدث الأخبار 📢", feed: "الخلاصة 🔥",
-            certificates: "الشهادات والتوثيق"
+            certificates: "الشهادات والتوثيق",
+            merger: "دمج الملفات الذكي 🤖"
         },
         en: {
             appName: "Luminova Edu", home: "Home", community: "Community", academic: "Academic Library",
@@ -56,7 +57,8 @@
             logout: "Admin Logout", passwordPrompt: "Enter admin password:", wrongPassword: "Wrong password!",
             major: "Major", correct: "Correct", wrong: "Wrong", results: "Results",
             topContributors: "Top Contributors 🏆", news: "Latest News 📢", feed: "The Feed 🔥",
-            certificates: "Certificates Archive"
+            certificates: "Certificates Archive",
+            merger: "Smart Data Merger 🤖"
         }
     };
 
@@ -992,11 +994,18 @@
 
     Luminova.Pages.AdminCMS = ({ data, setData, lang, goBack }) => {
         const validTabs = ['news', 'years', 'semesters', 'subjects', 'students', 'summaries', 'quizzes', 'certificates'];
+        if (window.CMS_USER_ROLE === 'admin') validTabs.push('merger');
         const [activeTab, setActiveTab] = useState('news');
         const [editingItem, setEditingItem] = useState(null);
         const [subView, setSubView] = useState(''); // '' or 'questions'
         const [qItem, setQItem] = useState(null); // Extracted dynamically to fix rules of hooks crash
         const [cmsSearchQuery, setCmsSearchQuery] = useState('');
+
+        // Merger State
+        const [mergerTarget, setMergerTarget] = useState('data'); // data, exams, certs
+        const [mergerBase, setMergerBase] = useState(null);
+        const [mergerLocal, setMergerLocal] = useState(null);
+        const [mergerStatus, setMergerStatus] = useState({ state: 'idle', msg: '' });
 
         const [isTranslating, setIsTranslating] = useState(false);
 
@@ -1156,6 +1165,135 @@
             const a = document.createElement('a');
             a.href = url;
             a.download = 'exam.js';
+            a.click();
+            URL.revokeObjectURL(url);
+        };
+
+        // --- MERGER LOGIC ---
+        const handleFetchBase = async () => {
+            setMergerStatus({ state: 'loading', msg: 'Fetching live data from GitHub...' });
+            const urls = { data: DATA_URL, exams: EXAM_URL, certs: CERTS_URL };
+            try {
+                const res = await fetch(urls[mergerTarget] + '?t=' + new Date().getTime());
+                if (!res.ok) throw new Error('Fetch failed');
+                const text = await res.text();
+                
+                // Extract data using robust parsing (No fields omitted)
+                let extracted;
+                if (mergerTarget === 'data') {
+                    const start = text.indexOf('{');
+                    const end = text.lastIndexOf('}');
+                    if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
+                } else if (mergerTarget === 'exams' || mergerTarget === 'certs') {
+                    const start = text.indexOf('[');
+                    const end = text.lastIndexOf(']');
+                    if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
+                }
+
+                if (extracted) {
+                    setMergerBase(extracted);
+                    setMergerStatus({ state: 'success', msg: `Successfully fetched ${mergerTarget} data.` });
+                } else {
+                    throw new Error('Could not parse file structure.');
+                }
+            } catch (e) {
+                setMergerStatus({ state: 'error', msg: 'Error: ' + e.message });
+            }
+        };
+
+        const handleFileDrop = (e) => {
+            e.preventDefault();
+            const file = e.dataTransfer ? e.dataTransfer.files[0] : e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target.result;
+                try {
+                    let extracted;
+                    if (mergerTarget === 'data') {
+                        const start = text.indexOf('{');
+                        const end = text.lastIndexOf('}');
+                        if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
+                    } else if (mergerTarget === 'exams' || mergerTarget === 'certs') {
+                        const start = text.indexOf('[');
+                        const end = text.lastIndexOf(']');
+                        if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
+                    }
+
+                    if (extracted) {
+                        setMergerLocal(extracted);
+                        setMergerStatus({ state: 'success', msg: `Parsed local ${file.name} successfully.` });
+                    } else {
+                        throw new Error('Structure mismatch. Ensure you uploaded the correct file type.');
+                    }
+                } catch (e) {
+                    setMergerStatus({ state: 'error', msg: 'Parse Error: ' + e.message });
+                }
+            };
+            reader.readAsText(file);
+        };
+
+        const handleExecuteMerge = () => {
+            if (!mergerBase || !mergerLocal) return;
+
+            let finalData;
+            let addedCount = 0;
+            let updatedCount = 0;
+
+            const mergeArray = (baseArr, localArr) => {
+                const map = new Map(baseArr.map(item => [item.id, item]));
+                localArr.forEach(item => {
+                    if (map.has(item.id)) {
+                        map.set(item.id, { ...map.get(item.id), ...item });
+                        updatedCount++;
+                    } else {
+                        map.set(item.id, item);
+                        addedCount++;
+                    }
+                });
+                return Array.from(map.values());
+            };
+
+            if (mergerTarget === 'data') {
+                finalData = { ...mergerBase };
+                ['years', 'semesters', 'subjects', 'students', 'summaries', 'news'].forEach(key => {
+                    if (mergerLocal[key]) {
+                        finalData[key] = mergeArray(mergerBase[key] || [], mergerLocal[key]);
+                    }
+                });
+            } else {
+                finalData = mergeArray(mergerBase, mergerLocal);
+            }
+
+            setMergerBase(finalData);
+            setMergerLocal(null);
+            setMergerStatus({ 
+                state: 'merged', 
+                msg: `Merge Complete! Added: ${addedCount}, Updated: ${updatedCount}. Total: ${mergerTarget === 'data' ? 'N/A' : finalData.length}` 
+            });
+        };
+
+        const handleDownloadMerged = () => {
+            if (!mergerBase) return;
+            let str = '';
+            let filename = '';
+            if (mergerTarget === 'data') {
+                str = `window.LUMINOVA_DATA = ${JSON.stringify(mergerBase, null, 2)};`;
+                filename = 'data.js';
+            } else if (mergerTarget === 'exams') {
+                str = `window.LUMINOVA_EXAMS = ${JSON.stringify(mergerBase, null, 2)};`;
+                filename = 'exam.js';
+            } else if (mergerTarget === 'certs') {
+                str = `window.LUMINOVA_CERTIFICATES = ${JSON.stringify(mergerBase, null, 2)};`;
+                filename = 'certificates.js';
+            }
+
+            const blob = new Blob([str], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
             a.click();
             URL.revokeObjectURL(url);
         };
@@ -1828,6 +1966,101 @@
                                     <${Luminova.Components.Button} variant="glass" onClick=${() => setEditingItem(null)} className="w-full md:w-[20%] text-xl py-4 rounded-2xl">${Luminova.i18n[lang].cancel}</${Luminova.Components.Button}>
                                 </div>
                             </div>
+                        ` : activeTab === 'merger' ? html`
+                            <div className="p-4 sm:p-8 animate-fade-in">
+                                <div className="mb-10 text-center">
+                                    <h4 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-brand-DEFAULT to-brand-gold mb-2">
+                                        ${lang === 'ar' ? 'دمج الملفات الذكي' : 'Smart Data Merger'}
+                                    </h4>
+                                    <p className="opacity-60 font-bold">${lang === 'ar' ? 'قم بدمج وتحديث البيانات من ملفات الفريق الخارجية مع النسخة الحية على GitHub' : 'Merge and update data from team files with the live version on GitHub'}</p>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                    <!-- STEP 1: SELECT & FETCH -->
+                                    <div className="space-y-6">
+                                        <${Luminova.Components.GlassCard} className="p-6 border-brand-DEFAULT/20 shadow-lg">
+                                            <h5 className="font-black text-lg mb-4 flex items-center gap-2">
+                                                <span className="w-8 h-8 rounded-full bg-brand-DEFAULT/20 flex items-center justify-center text-brand-DEFAULT text-sm">1</span>
+                                                ${lang === 'ar' ? 'تحديد نوع الملف الهدف' : 'Select Target File Type'}
+                                            </h5>
+                                            <div className="grid grid-cols-3 gap-3 mb-6">
+                                                ${['data', 'exams', 'certs'].map(t => html`
+                                                    <button onClick=${() => { setMergerTarget(t); setMergerBase(null); setMergerLocal(null); setMergerStatus({ state: 'idle', msg: '' }); }}
+                                                        className=${`p-4 rounded-xl border-2 font-black transition-all ${mergerTarget === t ? 'border-brand-DEFAULT bg-brand-DEFAULT/5 text-brand-DEFAULT shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'border-gray-200 dark:border-gray-700 opacity-60'}`}>
+                                                        <div className="text-xl mb-1">${t === 'data' ? '📊' : t === 'exams' ? '📝' : '📜'}</div>
+                                                        <div className="text-xs uppercase">${t}</div>
+                                                    </button>
+                                                `)}
+                                            </div>
+                                            <${Luminova.Components.Button} onClick=${handleFetchBase} disabled=${mergerStatus.state === 'loading'} className="w-full py-4 rounded-2xl shadow-xl shadow-brand-DEFAULT/20">
+                                                ${mergerStatus.state === 'loading' ? html`<span className="animate-spin mr-2">🔄</span>` : '⬇️'}
+                                                ${lang === 'ar' ? 'سحب النسخة الحية من GitHub' : 'Fetch Live GitHub Version'}
+                                            </${Luminova.Components.Button}>
+                                        </${Luminova.Components.GlassCard}>
+
+                                        ${mergerBase && html`
+                                            <${Luminova.Components.GlassCard} className="p-6 border-green-500/20 bg-green-500/5 animate-slide-up">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center text-green-500">✓</div>
+                                                    <div>
+                                                        <div className="font-black text-green-600 dark:text-green-400">${lang === 'ar' ? 'تم جلب البيانات بنجاح' : 'Base Data Ready'}</div>
+                                                        <div className="text-xs opacity-60 font-bold uppercase tracking-widest">${mergerTarget}.js source loaded</div>
+                                                    </div>
+                                                </div>
+                                            </${Luminova.Components.GlassCard}>
+                                        `}
+                                    </div>
+
+                                    <!-- STEP 2: UPLOAD & MERGE -->
+                                    <div className="space-y-6">
+                                        <${Luminova.Components.GlassCard} className="p-6 border-brand-gold/20 shadow-lg">
+                                            <h5 className="font-black text-lg mb-4 flex items-center gap-2">
+                                                <span className="w-8 h-8 rounded-full bg-brand-gold/20 flex items-center justify-center text-brand-gold text-sm">2</span>
+                                                ${lang === 'ar' ? 'رفع الملف الجديد للمزامنة' : 'Upload Local File to Sync'}
+                                            </h5>
+                                            
+                                            <div onDragOver=${e => e.preventDefault()} onDrop=${handleFileDrop} className="relative group">
+                                                <input type="file" onChange=${handleFileDrop} className="absolute inset-0 opacity-0 cursor-pointer z-10" accept=".js" />
+                                                <div className="border-4 border-dashed border-gray-200 dark:border-gray-800 rounded-3xl p-10 text-center transition-all group-hover:border-brand-gold/50 group-hover:bg-brand-gold/5">
+                                                    <div className="text-4xl mb-4 group-hover:scale-110 transition-transform">📂</div>
+                                                    <div className="font-black opacity-60">${lang === 'ar' ? 'اسحب الملف هنا أو اضغط للاختيار' : 'Drag & Drop file or click to browse'}</div>
+                                                    <div className="text-xs mt-2 text-brand-gold font-bold">Only .js files accepted</div>
+                                                </div>
+                                            </div>
+
+                                            ${mergerLocal && html`
+                                                <div className="mt-6 p-4 rounded-xl bg-brand-gold/10 border border-brand-gold/20 animate-bounce-subtle">
+                                                    <div className="font-black text-brand-gold flex items-center gap-2">
+                                                        <span>✨</span> ${lang === 'ar' ? 'تم التعرف على الملف المحلي' : 'Local File Recognized'}
+                                                    </div>
+                                                </div>
+                                            `}
+
+                                            <div className="mt-8 flex gap-4">
+                                                <${Luminova.Components.Button} onClick=${handleExecuteMerge} disabled=${!mergerBase || !mergerLocal} className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-brand-DEFAULT to-brand-hover shadow-xl shadow-brand-DEFAULT/30 disabled:opacity-30 disabled:grayscale">
+                                                    🚀 ${lang === 'ar' ? 'بدء الدمج الذكي' : 'Execute Smart Merge'}
+                                                </${Luminova.Components.Button}>
+                                            </div>
+                                        </${Luminova.Components.GlassCard}>
+
+                                        ${mergerStatus.state === 'merged' && html`
+                                            <${Luminova.Components.GlassCard} className="p-6 border-brand-gold/30 bg-brand-gold/5 animate-slide-up">
+                                                <h5 className="font-black text-brand-gold mb-3 flex items-center gap-2">📊 ${lang === 'ar' ? 'نتائج الدمج' : 'Merge Summary'}</h5>
+                                                <p className="text-sm font-bold opacity-80 mb-6 leading-relaxed">${mergerStatus.msg}</p>
+                                                <${Luminova.Components.Button} onClick=${handleDownloadMerged} className="w-full py-4 rounded-2xl bg-brand-gold text-black font-black shadow-[0_0_20px_rgba(251,191,36,0.3)] hover:shadow-[0_0_35px_rgba(251,191,36,0.5)] transition-all">
+                                                    ✨ ${lang === 'ar' ? 'تحميل الملف النهائي المدمج' : 'Download Final Merged File'}
+                                                </${Luminova.Components.Button}>
+                                            </${Luminova.Components.GlassCard}>
+                                        `}
+                                    </div>
+                                </div>
+
+                                ${mergerStatus.state === 'error' && html`
+                                    <div className="mt-8 p-6 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 font-black text-center animate-shake">
+                                        ❌ ${mergerStatus.msg}
+                                    </div>
+                                `}
+                            </div>
                         ` : html`
                             <div className="p-2 sm:p-4 space-y-3">
                                     ${displayedTableItems.map(item => {
@@ -1947,7 +2180,7 @@
                     const fetchAndEval = async (url, fallbackScript) => {
                         if (url && url !== "PASTE_YOUR_DATA_URL_HERE" && url !== "PASTE_YOUR_EXAM_URL_HERE" && url !== "PASTE_YOUR_CERTS_URL_HERE") {
                             try {
-                                const res = await fetch(url + '?v=' + Date.now());
+                                const res = await fetch(url + '?t=' + new Date().getTime());
                                 if (!res.ok) throw new Error('Fetch failed');
                                 const text = await res.text();
                                 // Execute the code in global scope
