@@ -1145,7 +1145,10 @@
 
         // Export 2 — certificates.js: certificate array ONLY
         const handleExportCertificates = () => {
-            const certs = data.certificates || [];
+            let certs = data.certificates || [];
+            if (window.CMS_USER_ROLE === 'editor') {
+                certs = certs.filter(item => window.CMS_EDITOR_ADDED_IDS && window.CMS_EDITOR_ADDED_IDS.includes(item.id));
+            }
             const str = `window.LUMINOVA_CERTIFICATES = ${JSON.stringify(certs, null, 2)};`;
             const blob = new Blob([str], { type: 'text/javascript' });
             const url = URL.createObjectURL(blob);
@@ -1158,7 +1161,10 @@
 
         // Export 3 — exam.js: quiz/exam array ONLY
         const handleExportExams = () => {
-            const exams = data.quizzes || [];
+            let exams = data.quizzes || [];
+            if (window.CMS_USER_ROLE === 'editor') {
+                exams = exams.filter(item => window.CMS_EDITOR_ADDED_IDS && window.CMS_EDITOR_ADDED_IDS.includes(item.id));
+            }
             const str = `window.LUMINOVA_EXAMS = ${JSON.stringify(exams, null, 2)};`;
             const blob = new Blob([str], { type: 'text/javascript' });
             const url = URL.createObjectURL(blob);
@@ -1503,7 +1509,7 @@
 
         // Filter logic including Real-Time Search
         let activeTableItems = data[activeTab] ? data[activeTab].filter(item => activeTab !== 'students' || !item.isFounder) : [];
-        if (window.CMS_USER_ROLE === 'editor') {
+        if (window.CMS_USER_ROLE === 'editor' && (activeTab === 'quizzes' || activeTab === 'certificates')) {
             activeTableItems = activeTableItems.filter(item => window.CMS_EDITOR_ADDED_IDS && window.CMS_EDITOR_ADDED_IDS.includes(item.id));
         }
 
