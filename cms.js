@@ -1318,6 +1318,47 @@
 
         const handleSave = () => {
             if (!editingItem) return;
+
+            // ========== SUMMARIES VALIDATION GATE ==========
+            if (activeTab === 'summaries') {
+                // 1. Chapter Tag is MANDATORY for the frontend Timeline UI
+                if (!editingItem.chapterTag || !editingItem.chapterTag.trim()) {
+                    return alert(lang === 'ar'
+                        ? '❌ يجب تحديد الفصل الدراسي (Chapter Tag) — مطلوب لعرض الخلاصة الزمنية.'
+                        : '❌ Chapter Tag is required for the Timeline UI.');
+                }
+
+                // 2. If mediaType is "interactive", validate the lessonUrl strictly
+                if (editingItem.mediaType === 'interactive') {
+                    const path = (editingItem.lessonUrl || '').trim();
+                    if (!path) {
+                        return alert(lang === 'ar'
+                            ? '❌ يجب إدخال مسار ملف الدرس التفاعلي (Lesson File Path).'
+                            : '❌ Lesson File Path is required for interactive content.');
+                    }
+                    // Must end with .jsx or .js
+                    if (!/\.(jsx|js)$/i.test(path)) {
+                        return alert(lang === 'ar'
+                            ? '❌ مسار الملف يجب أن ينتهي بـ .jsx أو .js'
+                            : '❌ File path must end with .jsx or .js');
+                    }
+                    // No spaces allowed
+                    if (/\s/.test(path)) {
+                        return alert(lang === 'ar'
+                            ? '❌ مسار الملف لا يجب أن يحتوي على مسافات فارغة.'
+                            : '❌ File path must not contain spaces.');
+                    }
+                    // No invalid URL characters (allow alphanumerics, hyphens, underscores, dots, slashes)
+                    if (/[^a-zA-Z0-9\-_.\/]/.test(path)) {
+                        return alert(lang === 'ar'
+                            ? '❌ مسار الملف يحتوي على أحرف غير صالحة. يُسمح فقط بالأحرف والأرقام و - و _ و . و /'
+                            : '❌ File path contains invalid characters. Only alphanumerics, -, _, ., and / are allowed.');
+                    }
+                    // Sanitize: commit the trimmed path back
+                    editingItem.lessonUrl = path;
+                }
+            }
+
             editingItem.timestamp = editingItem.timestamp || new Date().toISOString();
             if (activeTab === 'certificates') {
                 editingItem.date = editingItem.date || editingItem.timestamp;
@@ -1358,9 +1399,9 @@
             if (activeTab === 'news') return { ...base, titleAr: '', titleEn: '', contentAr: '', contentEn: '', mediaUrl: '' };
             if (activeTab === 'students') return { ...base, nameAr: 'عبد المنعم حجاج', nameEn: 'Abdelmonem Hagag', majorAr: '', majorEn: '', bioAr: '', bioEn: '', image: '', isVIP: false, isVerified: false, role: 'student', socialLinks: { facebook: '', instagram: '', linkedin: '' } };
             if (activeTab === 'years' || activeTab === 'semesters' || activeTab === 'subjects') return { ...base, nameAr: '', nameEn: '', yearId: '', semesterId: '' };
-            if (activeTab === 'summaries') return { ...base, titleAr: '', titleEn: '', contentAr: '', contentEn: '', mediaUrl: '', subjectId: '', studentId: '' };
+            if (activeTab === 'summaries') return { ...base, titleAr: '', titleEn: '', contentAr: '', contentEn: '', mediaUrl: '', subjectId: '', studentId: '', mediaType: 'video', chapterTag: '', lessonUrl: '' };
             if (activeTab === 'quizzes') return { ...base, titleAr: '', titleEn: '', isShuffled: false, feedbackMode: 'end', subjectId: '', publisherId: '', questions: [], examMode: 'practice', emailPolicy: 'none', adminEmails: '', startTime: '', endTime: '', latePolicy: 'hard_stop', allowBackNavigation: true };
-            if (activeTab === 'certificates') return { ...base, studentName: '', studentNameEn: '', senderName: '', senderNameEn: '', senderRole: 'doctor', title: '', titleEn: '', description: '', descriptionEn: '', isFeatured: false, badges: [], date: base.timestamp };
+            if (activeTab === 'certificates') return { ...base, studentName: '', studentNameEn: '', senderName: '', senderNameEn: '', senderRole: 'doctor', title: '', titleEn: '', description: '', descriptionEn: '', isFeatured: false, badges: [], date: base.timestamp, level: 'standard' };
             return base;
         };
 
@@ -1782,10 +1823,11 @@
                                         <div className="col-span-2 w-full p-4 border border-brand-DEFAULT rounded-xl"><${Luminova.Components.Input} type="checkbox" label="📌 إظهار كشهادة رئيسية في المنصة (Featured Certificate)" val=${editingItem.isFeatured} onChange=${v => setEditingItem({ ...editingItem, isFeatured: v })} /></div>
                                         
                                         <div className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                            <label className="block text-sm font-black mb-3 opacity-80 tracking-wide text-brand-gold">نوع الشارة (Seal Type)</label>
-                                            <select value=${editingItem.sealType || 'gold'} onChange=${e => setEditingItem({ ...editingItem, sealType: e.target.value })} className="w-full p-4 rounded-xl bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-2 border-brand-gold font-black outline-none shadow-sm cursor-pointer">
-                                                <option value="gold">شارة ذهبية 🏅 (Gold Seal)</option>
-                                                <option value="silver">شارة فضية 🥈 (Silver Seal)</option>
+                                            <label className="block text-sm font-black mb-3 opacity-80 tracking-wide text-brand-gold">مستوى الشهادة (Certificate Level)</label>
+                                            <select value=${editingItem.level || 'standard'} onChange=${e => setEditingItem({ ...editingItem, level: e.target.value })} className="w-full p-4 rounded-xl bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-2 border-brand-gold font-black outline-none shadow-sm cursor-pointer">
+                                                <option value="standard">عادية 📜 (Standard - No Seal)</option>
+                                                <option value="gold">ذهبية 🏅 (Gold Seal)</option>
+                                                <option value="silver">فضية 🥈 (Silver Seal)</option>
                                             </select>
                                         </div>
                                         
@@ -1851,9 +1893,68 @@
                                         <div className="col-span-2 w-full"><${Luminova.Components.Input} label="Summary Title" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
                                         <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة محتوى (عربي)" val=${editingItem.contentAr} onChange=${v => setEditingItem({ ...editingItem, contentAr: v })} /></div>
                                         <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="Summary Content (English)" val=${editingItem.contentEn} onChange=${v => setEditingItem({ ...editingItem, contentEn: v })} /></div>
-                                        <div className="col-span-2 w-full mt-2">
-                                            <${Luminova.Components.UniversalMediaInput} label="Media Attachments (مرفقات التلخيص)" attachments=${editingItem.mediaUrls || (editingItem.mediaUrl ? [editingItem.mediaUrl] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, mediaUrl: '' })} />
+                                        <div className="col-span-2 flex flex-col md:flex-row gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                            <div className="w-full">
+                                                <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">نوع المحتوى (Media Type)</label>
+                                                <select value=${editingItem.mediaType || 'video'} onChange=${e => setEditingItem({ ...editingItem, mediaType: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                    <option value="video">فيديو (Video)</option>
+                                                    <option value="pdf">ملف PDF (PDF File)</option>
+                                                    <option value="interactive">شرح تفاعلي (Interactive)</option>
+                                                    <option value="exam">اختبار (Exam)</option>
+                                                    <option value="other">أرشيف/أخرى (Other/Archive)</option>
+                                                </select>
+                                            </div>
+                                            <div className="w-full">
+                                                <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الفصل الدراسي (Chapter Tag) - للتجميع في الخلاصة</label>
+                                                <input list="chapterPresets" value=${editingItem.chapterTag || ''} onChange=${e => setEditingItem({ ...editingItem, chapterTag: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 font-bold outline-none focus:border-brand-DEFAULT transition-all" placeholder="مثال: الفصل الأول" />
+                                                <datalist id="chapterPresets">
+                                                    <option value="الفصل الأول" />
+                                                    <option value="الفصل الثاني" />
+                                                    <option value="الفصل الثالث" />
+                                                    <option value="الفصل الرابع" />
+                                                    <option value="الفصل الخامس" />
+                                                    <option value="الفصل السادس" />
+                                                    <option value="الفصل السابع" />
+                                                    <option value="الفصل الثامن" />
+                                                </datalist>
+                                            </div>
                                         </div>
+                                        ${editingItem.mediaType === 'interactive' ? html`
+                                            <div className="col-span-2 w-full mt-2 p-6 rounded-2xl border-2 border-purple-400/40 bg-gradient-to-br from-purple-50/60 to-indigo-50/60 dark:from-purple-900/15 dark:to-indigo-900/15 backdrop-blur-xl shadow-lg">
+                                                <label className="block text-sm font-black mb-3 text-purple-600 dark:text-purple-400 drop-shadow-sm flex items-center gap-2">
+                                                    <span>🧩</span> مسار ملف الدرس التفاعلي (Lesson File Path)
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value=${editingItem.lessonUrl || ''}
+                                                    onChange=${e => {
+                                                        const val = e.target.value;
+                                                        setEditingItem({ ...editingItem, lessonUrl: val });
+                                                    }}
+                                                    className=${`w-full p-4 rounded-xl bg-white dark:bg-gray-800 border-2 font-mono font-bold outline-none transition-all ${
+                                                        editingItem.lessonUrl && !/\.(jsx|js)$/i.test(editingItem.lessonUrl.trim())
+                                                            ? 'border-red-400 focus:border-red-500 text-red-600 dark:text-red-400'
+                                                            : editingItem.lessonUrl && /\.(jsx|js)$/i.test(editingItem.lessonUrl.trim())
+                                                                ? 'border-green-400 focus:border-green-500 text-green-700 dark:text-green-400'
+                                                                : 'border-gray-200 dark:border-gray-700 focus:border-purple-500'
+                                                    }`}
+                                                    placeholder="lessons/interactive/chapter1-intro.jsx"
+                                                    dir="ltr"
+                                                />
+                                                <div className="flex items-center gap-2 mt-3">
+                                                    ${editingItem.lessonUrl && /\.(jsx|js)$/i.test(editingItem.lessonUrl.trim()) && !/\s/.test(editingItem.lessonUrl.trim())
+                                                        ? html`<span className="text-green-500 text-sm font-bold flex items-center gap-1">✅ مسار صالح (Valid path)</span>`
+                                                        : editingItem.lessonUrl
+                                                            ? html`<span className="text-red-500 text-sm font-bold flex items-center gap-1">⚠️ يجب أن ينتهي بـ .jsx أو .js بدون مسافات</span>`
+                                                            : html`<span className="text-gray-400 text-xs">يجب أن ينتهي المسار بـ .jsx أو .js — مثال: lessons/physics/force-sim.jsx</span>`
+                                                    }
+                                                </div>
+                                            </div>
+                                        ` : html`
+                                            <div className="col-span-2 w-full mt-2">
+                                                <${Luminova.Components.UniversalMediaInput} label="Media Attachments (مرفقات التلخيص)" attachments=${editingItem.mediaUrls || (editingItem.mediaUrl ? [editingItem.mediaUrl] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, mediaUrl: '' })} />
+                                            </div>
+                                        `}
                                     ` : activeTab === 'quizzes' ? html`
                                         <div className="col-span-2">
                                             <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">ناشر الاختبار (Quiz Publisher - للعرض فقط بلا مساهمات)</label>
