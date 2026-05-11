@@ -15,6 +15,201 @@
     window.__LUMINOVA = { Core: {}, Components: {}, Pages: {}, Icons: {} };
     const Luminova = window.__LUMINOVA;
 
+    const FILE_SCHEMAS = {
+        data: { variable: 'LUMINOVA_DATA', kind: 'object', url: DATA_URL, fallback: 'data.js' },
+        exams: { variable: 'LUMINOVA_EXAMS', kind: 'array', url: EXAM_URL, fallback: 'exam.js' },
+        certs: { variable: 'LUMINOVA_CERTIFICATES', kind: 'array', url: CERTS_URL, fallback: 'certificates.js' }
+    };
+
+    const normalizeText = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+    const stripTrailingSemicolon = (value) => String(value || '').trim().replace(/;\s*$/, '').trim();
+
+    const parseLuminovaPayload = (text, target) => {
+        const schema = FILE_SCHEMAS[target];
+        if (!schema) throw new Error(`Unknown data target: ${target}`);
+
+        const raw = String(text || '').replace(/^\uFEFF/, '').trim();
+        const candidates = [raw];
+        const assignmentRegex = new RegExp(`(?:window\\.)?${schema.variable}\\s*=\\s*([\\s\\S]*?)\\s*;?\\s*$`);
+        const assignmentMatch = raw.match(assignmentRegex);
+        if (assignmentMatch && assignmentMatch[1]) candidates.unshift(assignmentMatch[1]);
+
+        const opener = schema.kind === 'array' ? '[' : '{';
+        const closer = schema.kind === 'array' ? ']' : '}';
+        const start = raw.indexOf(opener);
+        const end = raw.lastIndexOf(closer);
+        if (start !== -1 && end > start) candidates.push(raw.substring(start, end + 1));
+
+        for (const candidate of candidates) {
+            try {
+                const parsed = JSON.parse(stripTrailingSemicolon(candidate));
+                const isValid = schema.kind === 'array'
+                    ? Array.isArray(parsed)
+                    : parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+                if (isValid) return parsed;
+            } catch (error) {
+                // Keep trying narrower candidates before surfacing a parse error.
+            }
+        }
+
+        throw new Error(`Could not parse ${schema.variable} as ${schema.kind} JSON.`);
+    };
+
+    const assignLuminovaPayload = (target, payload) => {
+        const schema = FILE_SCHEMAS[target];
+        if (!schema) return;
+        window[schema.variable] = payload;
+    };
+
+    const getExamIdentity = (exam) => normalizeText(exam?.examCode || exam?.examId || exam?.code || exam?.id);
+
+    const getQuestionSignature = (question) => {
+        if (!question || typeof question !== 'object') return '';
+        const textAr = normalizeText(question.textAr || question.questionAr || question.promptAr);
+        const textEn = normalizeText(question.textEn || question.questionEn || question.promptEn);
+        const text = normalizeText(question.text || question.question || question.prompt);
+        const optionText = Array.isArray(question.options)
+            ? question.options.map(opt => {
+                if (opt && typeof opt === 'object') {
+                    return normalizeText(opt.textAr || opt.textEn || opt.text || opt.label || opt.value);
+                }
+                return normalizeText(opt);
+            }).join('|')
+            : '';
+        const correctText = Array.isArray(question.correctAnswers)
+            ? question.correctAnswers.map(normalizeText).sort().join('|')
+            : normalizeText(question.correctAnswer);
+        const answerText = normalizeText(question.modelAnswer || question.answer);
+        if (!textAr && !textEn && !text && !optionText && !correctText && !answerText) return '';
+        return [
+            normalizeText(question.type || 'mcq'),
+            textAr,
+            textEn,
+            text,
+            optionText,
+            correctText,
+            answerText
+        ].join('::');
+    };
+
+    const getQuestionKeys = (question) => {
+        const keys = [];
+        if (question?.id) keys.push(`id:${normalizeText(question.id)}`);
+        const signature = getQuestionSignature(question);
+        if (signature.replace(/[:|]/g, '').trim()) keys.push(`sig:${signature}`);
+        return keys;
+    };
+
+    const mergeExamMetadata = (existing, incoming) => {
+        const merged = { ...existing };
+        Object.entries(incoming || {}).forEach(([key, value]) => {
+            if (key === 'questions' || value === undefined || value === null || value === '') return;
+            if (['id', 'examCode', 'examId', 'code'].includes(key)) {
+                if (!merged[key]) merged[key] = value;
+                return;
+            }
+            const current = merged[key];
+            const currentIsEmpty = current === undefined || current === null || current === '' || (Array.isArray(current) && current.length === 0);
+            if (currentIsEmpty) merged[key] = value;
+        });
+        return merged;
+    };
+
+    const createQuestionId = (usedIds) => {
+        let id;
+        do {
+            id = `q_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        } while (usedIds.has(id));
+        usedIds.add(id);
+        return id;
+    };
+
+    const addUniqueQuestions = (targetQuestions, incomingQuestions, stats) => {
+        const existingKeys = new Set();
+        const usedIds = new Set();
+
+        targetQuestions.forEach(question => {
+            if (question?.id) usedIds.add(String(question.id));
+            getQuestionKeys(question).forEach(key => existingKeys.add(key));
+        });
+
+        (incomingQuestions || []).forEach(question => {
+            if (!question || typeof question !== 'object') return;
+            const keys = getQuestionKeys(question);
+            const isDuplicate = keys.length > 0 && keys.some(key => existingKeys.has(key));
+            if (isDuplicate) {
+                stats.skippedDuplicateQuestions++;
+                return;
+            }
+
+            const nextQuestion = { ...question };
+            if (!nextQuestion.id || usedIds.has(String(nextQuestion.id))) {
+                nextQuestion.id = createQuestionId(usedIds);
+            } else {
+                usedIds.add(String(nextQuestion.id));
+            }
+
+            targetQuestions.push(nextQuestion);
+            getQuestionKeys(nextQuestion).forEach(key => existingKeys.add(key));
+            stats.addedQuestions++;
+        });
+    };
+
+    const mergeExamCollections = (baseExams = [], incomingExams = []) => {
+        const stats = {
+            createdExams: 0,
+            mergedExams: 0,
+            ignoredExams: 0,
+            addedQuestions: 0,
+            skippedDuplicateQuestions: 0,
+            finalQuestionCount: 0
+        };
+        const merged = (Array.isArray(baseExams) ? baseExams : []).map(exam => ({
+            ...exam,
+            questions: Array.isArray(exam?.questions) ? [...exam.questions] : []
+        }));
+        const indexByIdentity = new Map();
+
+        merged.forEach((exam, index) => {
+            const identity = getExamIdentity(exam);
+            if (identity) indexByIdentity.set(identity, index);
+        });
+
+        (Array.isArray(incomingExams) ? incomingExams : []).forEach(incoming => {
+            const identity = getExamIdentity(incoming);
+            if (!identity) {
+                stats.ignoredExams++;
+                return;
+            }
+
+            const existingIndex = indexByIdentity.get(identity);
+            if (existingIndex !== undefined) {
+                const existing = merged[existingIndex];
+                const questions = Array.isArray(existing.questions) ? [...existing.questions] : [];
+                addUniqueQuestions(questions, Array.isArray(incoming.questions) ? incoming.questions : [], stats);
+                merged[existingIndex] = { ...mergeExamMetadata(existing, incoming), questions };
+                stats.mergedExams++;
+                return;
+            }
+
+            const questions = [];
+            addUniqueQuestions(questions, Array.isArray(incoming.questions) ? incoming.questions : [], stats);
+            const nextExam = { ...incoming, questions };
+            merged.push(nextExam);
+            indexByIdentity.set(identity, merged.length - 1);
+            stats.createdExams++;
+        });
+
+        stats.finalQuestionCount = merged.reduce((total, exam) => total + ((exam.questions || []).length), 0);
+        return { exams: merged, stats };
+    };
+
+    const parseEmailList = (value) => String(value || '')
+        .split(',')
+        .map(email => email.trim())
+        .filter(Boolean);
+
     Luminova.FOUNDER = {
         id: 's_founder_hardcoded', nameAr: 'محمود عبد الرحمن عبدالله', nameEn: 'Mahmoud Abdelrahman', isFounder: true, isVIP: true, isVerified: true,
         image: '../img/profile.png', majorAr: 'تكنولوجيا التعليم', majorEn: 'Educational Technology',
@@ -1007,6 +1202,170 @@
         const [mergerLocal, setMergerLocal] = useState(null);
         const [mergerStatus, setMergerStatus] = useState({ state: 'idle', msg: '' });
 
+        const [examMergeStatus, setExamMergeStatus] = useState(null);
+        const [bulkSendStatus, setBulkSendStatus] = useState(null);
+
+        const handleMultiExamImport = (e) => {
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
+
+            const readPromises = files.map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            resolve(parseLuminovaPayload(event.target.result, 'exams'));
+                        } catch (err) {
+                            resolve([]);
+                        }
+                    };
+                    reader.readAsText(file);
+                });
+            });
+
+            Promise.all(readPromises).then(results => {
+                const allExams = results.flat();
+                if (!allExams.length) {
+                    setExamMergeStatus('No valid exams found in the selected files.');
+                    setTimeout(() => setExamMergeStatus(null), 8000);
+                    return;
+                }
+
+                const groups = {};
+                allExams.forEach(ex => {
+                    const identity = getExamIdentity(ex);
+                    if (!identity) return;
+                    if (!groups[identity]) groups[identity] = [];
+                    groups[identity].push(ex);
+                });
+
+                let totalFinalQuestions = 0;
+                let newExamsCount = 0;
+                let mergedExamsCount = 0;
+                let addedQuestionsCount = 0;
+                let skippedDuplicateQuestions = 0;
+
+                if (Object.keys(groups).length === 0) {
+                    setExamMergeStatus('No importable exams were found. Each exam needs an examCode, examId, code, or id.');
+                    setTimeout(() => setExamMergeStatus(null), 8000);
+                    return;
+                }
+
+                if (Object.keys(groups).length > 0) {
+                    setData(prev => {
+                        const newQuizzes = [...prev.quizzes];
+                        Object.keys(groups).forEach(code => {
+                            const group = groups[code];
+                            const existingIdx = newQuizzes.findIndex(q => getExamIdentity(q) === code);
+
+                            let baseExam;
+                            let existingQuestions = [];
+
+                            if (existingIdx !== -1) {
+                                // MERGE: Start with existing test as base
+                                baseExam = { ...newQuizzes[existingIdx] };
+                                existingQuestions = [...(baseExam.questions || [])];
+                                mergedExamsCount++;
+                                
+                                // Optionally update metadata from the uploaded file if it's "richer"
+                                const firstRichUpload = group.find(g => g.titleAr || g.title);
+                                if (firstRichUpload) {
+                                    baseExam = { ...mergeExamMetadata(baseExam, firstRichUpload), questions: existingQuestions };
+                                }
+                            } else {
+                                // UPLOAD NEW: Use first item from group as base
+                                baseExam = { ...group[0] };
+                                existingQuestions = [];
+                                newExamsCount++;
+                            }
+
+                            const questionStats = { addedQuestions: 0, skippedDuplicateQuestions: 0 };
+                            group.forEach(g => {
+                                addUniqueQuestions(existingQuestions, Array.isArray(g.questions) ? g.questions : [], questionStats);
+                            });
+                            addedQuestionsCount += questionStats.addedQuestions;
+                            skippedDuplicateQuestions += questionStats.skippedDuplicateQuestions;
+
+                            baseExam.questions = existingQuestions;
+                            totalFinalQuestions += baseExam.questions.length;
+
+                            if (existingIdx !== -1) {
+                                newQuizzes[existingIdx] = baseExam;
+                            } else {
+                                newQuizzes.push(baseExam);
+                            }
+                        });
+                        window.LUMINOVA_EXAMS = newQuizzes;
+                        return { ...prev, quizzes: newQuizzes };
+                    });
+
+                    const statusMsg = `Processed: ${newExamsCount} new, ${mergedExamsCount} merged, ${addedQuestionsCount} questions added, ${skippedDuplicateQuestions} duplicates skipped. Total questions: ${totalFinalQuestions}.`;
+                    
+                    setExamMergeStatus(statusMsg);
+                    setTimeout(() => setExamMergeStatus(null), 8000);
+                }
+            });
+            e.target.value = '';
+        };
+
+        const [isSendingBulk, setIsSendingBulk] = useState(false);
+
+        const handleBulkSendReports = async () => {
+            if (!editingItem || !editingItem.webhookUrl) {
+                setBulkSendStatus({ state: 'error', msg: 'Webhook URL is required in Advanced Settings.' });
+                setTimeout(() => setBulkSendStatus(null), 9000);
+                return;
+            }
+            if (!confirm(lang === 'ar' ? 'هل أنت متأكد من إرسال التقارير الشاملة لجميع الطلاب؟\nسيتم إرسال بريد إلكتروني لكل طالب قام بتسليم الاختبار.' : 'Are you sure you want to send reports to all students?')) return;
+
+            setIsSendingBulk(true);
+            setBulkSendStatus({ state: 'loading', msg: 'Sending bulk report request...' });
+            try {
+                const payload = {
+                    action: 'bulk_send_reports',
+                    sheetName: (editingItem.sheetName || 'Sheet1').trim() || 'Sheet1',
+                    examDetails: {
+                        title: editingItem.titleAr || editingItem.titleEn || editingItem.title || editingItem.id || ''
+                    },
+                    settings: {
+                        adminEmails: parseEmailList(editingItem.adminEmails)
+                    }
+                };
+                const response = await fetch(editingItem.webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload)
+                });
+
+                const responseText = await response.text();
+                let result = {};
+                if (responseText) {
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (parseError) {
+                        if (!response.ok) throw parseError;
+                        result = { success: true, message: responseText };
+                    }
+                }
+                if (result.status === 'success' || result.success) {
+                    setBulkSendStatus({ state: 'success', msg: 'Bulk report emails were triggered successfully.' });
+                } else {
+                    throw new Error(result.message || 'Unknown GAS response.');
+                }
+            } catch (error) {
+                const corsLike = error instanceof TypeError;
+                setBulkSendStatus({
+                    state: corsLike ? 'success' : 'error',
+                    msg: corsLike
+                        ? 'Request sent. Check the Google Apps Script execution log for delivery results.'
+                        : 'Bulk send failed: ' + error.message
+                });
+            } finally {
+                setIsSendingBulk(false);
+                setTimeout(() => setBulkSendStatus(null), 9000);
+            }
+        };
+
         const [isTranslating, setIsTranslating] = useState(false);
 
         const translateText = async (arabicText) => {
@@ -1183,18 +1542,8 @@
                 const res = await fetch(urls[mergerTarget] + '?t=' + new Date().getTime());
                 if (!res.ok) throw new Error('Fetch failed');
                 const text = await res.text();
-                
-                // Extract data using robust parsing (No fields omitted)
-                let extracted;
-                if (mergerTarget === 'data') {
-                    const start = text.indexOf('{');
-                    const end = text.lastIndexOf('}');
-                    if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
-                } else if (mergerTarget === 'exams' || mergerTarget === 'certs') {
-                    const start = text.indexOf('[');
-                    const end = text.lastIndexOf(']');
-                    if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
-                }
+
+                const extracted = parseLuminovaPayload(text, mergerTarget);
 
                 if (extracted) {
                     setMergerBase(extracted);
@@ -1216,16 +1565,7 @@
             reader.onload = (event) => {
                 const text = event.target.result;
                 try {
-                    let extracted;
-                    if (mergerTarget === 'data') {
-                        const start = text.indexOf('{');
-                        const end = text.lastIndexOf('}');
-                        if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
-                    } else if (mergerTarget === 'exams' || mergerTarget === 'certs') {
-                        const start = text.indexOf('[');
-                        const end = text.lastIndexOf(']');
-                        if (start !== -1 && end !== -1) extracted = JSON.parse(text.substring(start, end + 1));
-                    }
+                    const extracted = parseLuminovaPayload(text, mergerTarget);
 
                     if (extracted) {
                         setMergerLocal(extracted);
@@ -1268,15 +1608,27 @@
                         finalData[key] = mergeArray(mergerBase[key] || [], mergerLocal[key]);
                     }
                 });
+            } else if (mergerTarget === 'exams') {
+                const result = mergeExamCollections(mergerBase, mergerLocal);
+                finalData = result.exams;
+                addedCount = result.stats.createdExams + result.stats.addedQuestions;
+                updatedCount = result.stats.mergedExams;
+                setMergerStatus({
+                    state: 'merged',
+                    msg: `Exam Merge Complete! New exams: ${result.stats.createdExams}, merged exams: ${result.stats.mergedExams}, questions added: ${result.stats.addedQuestions}, duplicates skipped: ${result.stats.skippedDuplicateQuestions}, ignored exams: ${result.stats.ignoredExams}. Total exams: ${finalData.length}.`
+                });
+                setMergerBase(finalData);
+                setMergerLocal(null);
+                return;
             } else {
                 finalData = mergeArray(mergerBase, mergerLocal);
             }
 
             setMergerBase(finalData);
             setMergerLocal(null);
-            setMergerStatus({ 
-                state: 'merged', 
-                msg: `Merge Complete! Added: ${addedCount}, Updated: ${updatedCount}. Total: ${mergerTarget === 'data' ? 'N/A' : finalData.length}` 
+            setMergerStatus({
+                state: 'merged',
+                msg: `Merge Complete! Added: ${addedCount}, Updated: ${updatedCount}. Total: ${mergerTarget === 'data' ? 'N/A' : finalData.length}`
             });
         };
 
@@ -1359,9 +1711,17 @@
                 }
             }
 
+            if (activeTab === 'quizzes') {
+                editingItem.examCode = editingItem.examCode || 'LUM-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 5).toUpperCase();
+            }
+
             editingItem.timestamp = editingItem.timestamp || new Date().toISOString();
             if (activeTab === 'certificates') {
                 editingItem.date = editingItem.date || editingItem.timestamp;
+            }
+            if (activeTab === 'quizzes') {
+                editingItem.sheetName = (editingItem.sheetName || 'Sheet1').trim() || 'Sheet1';
+                editingItem.entryGate = { name: true, department: true, email: true, ...(editingItem.entryGate || {}) };
             }
             setData(prev => {
                 const isExisting = prev[activeTab].find(i => i.id === editingItem.id);
@@ -1400,7 +1760,7 @@
             if (activeTab === 'students') return { ...base, nameAr: 'عبد المنعم حجاج', nameEn: 'Abdelmonem Hagag', majorAr: '', majorEn: '', bioAr: '', bioEn: '', image: '', isVIP: false, isVerified: false, role: 'student', socialLinks: { facebook: '', instagram: '', linkedin: '' } };
             if (activeTab === 'years' || activeTab === 'semesters' || activeTab === 'subjects') return { ...base, nameAr: '', nameEn: '', yearId: '', semesterId: '' };
             if (activeTab === 'summaries') return { ...base, titleAr: '', titleEn: '', contentAr: '', contentEn: '', mediaUrl: '', subjectId: '', studentId: '', mediaType: 'video', chapterTag: '', lessonUrl: '' };
-            if (activeTab === 'quizzes') return { ...base, titleAr: '', titleEn: '', isShuffled: false, feedbackMode: 'end', subjectId: '', publisherId: '', questions: [], examMode: 'practice', emailPolicy: 'none', adminEmails: '', startTime: '', endTime: '', latePolicy: 'hard_stop', allowBackNavigation: true };
+            if (activeTab === 'quizzes') return { ...base, titleAr: '', titleEn: '', examCode: 'EXM_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5), isShuffled: false, feedbackMode: 'end', subjectId: '', publisherId: '', questions: [], examMode: 'practice', emailPolicy: 'none', adminEmails: '', sheetName: 'Sheet1', startTime: '', endTime: '', latePolicy: 'hard_stop', allowBackNavigation: true, webhookUrl: '', sendDetailedReport: false, entryGate: { name: true, department: true, email: true } };
             if (activeTab === 'certificates') return { ...base, studentName: '', studentNameEn: '', senderName: '', senderNameEn: '', senderRole: 'doctor', title: '', titleEn: '', description: '', descriptionEn: '', isFeatured: false, badges: [], date: base.timestamp, level: 'standard' };
             return base;
         };
@@ -1413,7 +1773,7 @@
             if (subView === 'editQuestion') {
                 const tempQ = qItem || { type: 'mcq', text: '', score: 1, options: ['', '', '', ''], correctAnswers: [0], modelAnswer: '', explanation: '', studentId: Luminova.FOUNDER.id, showExp: false };
                 return html`
-                <div className="animate-fade-in pb-20 max-w-4xl mx-auto">
+                <div key="edit-question-view" className="animate-fade-in pb-20 max-w-4xl mx-auto">
                     <div className="flex items-center justify-between mb-8 pb-4 border-b">
                         <h2 className="text-3xl font-bold text-brand-DEFAULT">${tempQ.id ? 'تعديل سؤال (Edit)' : 'سؤال جديد (New)'}</h2>
                         <${Luminova.Components.Button} onClick=${() => setSubView('questionsList')}>${Luminova.i18n[lang].cancel}</${Luminova.Components.Button}>
@@ -1488,12 +1848,8 @@
                         `}
 
                         <div className="col-span-2 pt-6">
-                            <button onClick=${() => setQItem({ ...tempQ, showExp: !tempQ.showExp })} className="text-brand-DEFAULT font-bold bg-brand-DEFAULT/10 px-4 py-2 rounded-xl flex items-center gap-2 w-max">
-                                💡 ${tempQ.showExp || tempQ.explanation || tempQ.explanationAr ? 'إخفاء التعليل' : 'إضافة تعليل للإجابة (Explanation)'}
-                            </button>
-                            ${(tempQ.showExp || tempQ.explanation || tempQ.explanationAr) && html`
-                                <textarea value=${tempQ.explanation || tempQ.explanationAr || ''} onChange=${e => setQItem({ ...tempQ, explanation: e.target.value })} className="w-full p-4 mt-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/30 outline-none min-h-[100px] text-brand-gold" placeholder="اكتب شرحاً أو تعليلاً لسبب الإجابة الصحيحة..." />
-                            `}
+                            <label className="block text-sm font-bold mb-2">Explanation / التعليل</label>
+                            <textarea value=${tempQ.explanation || tempQ.explanationAr || ''} onChange=${e => setQItem({ ...tempQ, explanation: e.target.value })} className="w-full p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/30 outline-none min-h-[100px] text-brand-gold" placeholder="اكتب شرحاً أو تعليلاً لسبب الإجابة الصحيحة..." />
                         </div>
 
                         <div className="col-span-2 mt-8 flex gap-4 border-t pt-4">
@@ -1505,7 +1861,7 @@
             } // End Edit Question
 
             return html`
-            <div className="animate-fade-in pb-20">
+            <div key="questions-list-view" className="animate-fade-in pb-20">
                 <div className="flex items-center justify-between mb-8 pb-4 border-b">
                     <div>
                         <h2 className="text-3xl font-black text-brand-gold">Quiz Questions Matrix</h2>
@@ -1521,7 +1877,7 @@
                 
                 <div className="space-y-4">
                     ${(editingItem.questions || []).map((q, idx) => html`
-                        <${Luminova.Components.GlassCard} key=${q.id} className="flex justify-between items-center border-l-4 border-brand-DEFAULT">
+                        <${Luminova.Components.GlassCard} key=${q.id || `q_${idx}`} className="flex justify-between items-center border-l-4 border-brand-DEFAULT">
                             <div>
                                 <span className="font-bold mr-4 text-brand-DEFAULT">Q${idx + 1}.</span>
                                 <span className="text-lg font-bold">${q.textAr || q.textEn || 'Draft Question'}</span>
@@ -1597,6 +1953,7 @@
 
                     ${/* Always visible: Export core data.js */ html`
                         <${Luminova.Components.Button}
+                            key="export-data"
                             onClick=${handleExportData}
                             className="bg-brand-DEFAULT text-white shadow-lg hover:bg-brand-hover text-sm sm:text-base px-4 sm:px-6"
                             title=${lang === 'ar' ? 'تصدير الإعدادات والأخبار والطلاب والمواد والتلخيصات' : 'Export settings, news, students, subjects & summaries'}
@@ -1609,6 +1966,7 @@
 
                     ${/* Context-sensitive: show certificates export only on certificates tab */ activeTab === 'certificates' && html`
                         <${Luminova.Components.Button}
+                            key="export-certs"
                             onClick=${handleExportCertificates}
                             className="bg-brand-gold text-black shadow-lg hover:bg-yellow-500 text-sm sm:text-base px-4 sm:px-6"
                             title=${lang === 'ar' ? 'تصدير ملف الشهادات فقط' : 'Export certificates.js only'}
@@ -1621,6 +1979,7 @@
 
                     ${/* Context-sensitive: show exam export only on quizzes tab */ activeTab === 'quizzes' && html`
                         <${Luminova.Components.Button}
+                            key="export-exams"
                             onClick=${handleExportExams}
                             className="bg-indigo-500 text-white shadow-lg hover:bg-indigo-600 text-sm sm:text-base px-4 sm:px-6"
                             title=${lang === 'ar' ? 'تصدير ملف الاختبارات فقط' : 'Export exam.js only'}
@@ -1657,47 +2016,61 @@
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 sm:mb-8 border-b dark:border-gray-700 pb-4 sm:pb-6 px-4 gap-4">
                             <h3 className="text-2xl sm:text-4xl font-black text-brand-DEFAULT shrink-0">${Luminova.i18n[lang][activeTab] || activeTab}</h3>
                             ${!editingItem && html`
-                                <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto sm:flex-1 sm:max-w-lg sm:justify-end items-stretch">
-                                    <input type="text" placeholder=${lang === 'ar' ? 'بحث في هذا القسم...' : 'Search in this section...'} value=${cmsSearchQuery} onChange=${e => setCmsSearchQuery(e.target.value)} className="w-full sm:flex-1 p-3 sm:p-4 rounded-2xl backdrop-blur-lg bg-white/40 dark:bg-slate-800/50 border border-white/20 dark:border-slate-700/50 focus:border-brand-DEFAULT focus:shadow-[0_0_15px_rgba(6,182,212,0.4)] outline-none shadow-sm font-bold placeholder:opacity-50 text-sm sm:text-base transition-all" />
-                                    <${Luminova.Components.Button} onClick=${() => setEditingItem(getNewTemplate())} className="text-base sm:text-xl px-6 sm:px-10 py-3 sm:py-4 rounded-2xl bg-gradient-to-r from-brand-DEFAULT to-brand-hover hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-black shrink-0 justify-center border-none">
+                                <div key="search-add-bar" className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto sm:flex-1 sm:max-w-xl sm:justify-end items-stretch">
+                                    <input type="text" placeholder=${lang === 'ar' ? 'بحث في هذا القسم...' : 'Search in this section...'} value=${cmsSearchQuery} onChange=${e => setCmsSearchQuery(e.target.value)} className="w-full sm:flex-1 p-4 rounded-2xl bg-white/80 dark:bg-slate-900/80 border-2 border-brand-DEFAULT/30 focus:border-brand-DEFAULT focus:shadow-[0_0_20px_rgba(6,182,212,0.6)] outline-none shadow-lg text-brand-DEFAULT dark:text-brand-gold font-black placeholder:text-gray-400 text-sm sm:text-base transition-all" />
+                                    ${activeTab === 'quizzes' && html`
+                                        <div key="import-merge-zone" className="relative overflow-hidden group border-none">
+                                            <${Luminova.Components.Button} className="text-base sm:text-lg px-4 sm:px-6 py-3 sm:py-4 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 hover:shadow-[0_0_20px_rgba(99,102,241,0.5)] transition-all font-black shrink-0 justify-center border-none flex items-center gap-2">
+                                                <span>📥</span> ${lang === 'ar' ? 'رفع ودمج ملفات الاختبار' : 'Import & Merge Exam Files'}
+                                            </${Luminova.Components.Button}>
+                                            <input type="file" multiple accept=".js,.json" onChange=${handleMultiExamImport} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="Import & Merge Exam Files" />
+                                        </div>
+                                    `}
+                                    <${Luminova.Components.Button} key="add-new-btn" onClick=${() => setEditingItem(getNewTemplate())} className="text-base sm:text-xl px-6 sm:px-10 py-3 sm:py-4 rounded-2xl bg-gradient-to-r from-brand-DEFAULT to-brand-hover hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-black shrink-0 justify-center border-none">
                                         ${lang === 'ar' ? '+ إضافة جديد' : '+ Add New'}
                                     </${Luminova.Components.Button}>
                                 </div>
                             `}
                         </div>
 
+                        ${examMergeStatus && html`
+                            <div key="exam-merge-status" className="mx-4 mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 font-black text-center animate-bounce-subtle">
+                                ✅ ${examMergeStatus}
+                            </div>
+                        `}
+
                         ${!editingItem && ['subjects', 'summaries', 'quizzes'].includes(activeTab) && html`
-                            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 px-4 mb-6 relative z-10">
-                                <select value=${filterYear} onChange=${e => { setFilterYear(e.target.value); setFilterSem(''); setFilterSub(''); }} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1">
+                            <div key="table-filters" className="flex flex-col sm:flex-row gap-3 sm:gap-4 px-4 mb-6 relative z-10">
+                                <select key="filter-year" value=${filterYear} onChange=${e => { setFilterYear(e.target.value); setFilterSem(''); setFilterSub(''); }} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1">
                                     <option value="">${lang === 'ar' ? 'كل الفرق (All Years)' : 'All Years'}</option>
                                     ${data.years.map(y => html`<option key=${y.id} value=${y.id}>${y.nameAr || y.name}</option>`)}
                                 </select>
-                                <select value=${filterSem} onChange=${e => { setFilterSem(e.target.value); setFilterSub(''); }} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1 text-brand-DEFAULT">
+                                <select key="filter-semester" value=${filterSem} onChange=${e => { setFilterSem(e.target.value); setFilterSub(''); }} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1 text-brand-DEFAULT">
                                     <option value="">${lang === 'ar' ? 'كل الأترام (All Semesters)' : 'All Semesters'}</option>
                                     ${data.semesters.filter(s => !filterYear || s.yearId === filterYear).map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
                                 </select>
                                 ${['summaries', 'quizzes'].includes(activeTab) && html`
-                                    <select value=${filterSub} onChange=${e => setFilterSub(e.target.value)} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1 text-brand-hover">
+                                    <select key="filter-subject" value=${filterSub} onChange=${e => setFilterSub(e.target.value)} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1 text-brand-hover">
                                         <option value="">${lang === 'ar' ? 'كل المواد (All Subjects)' : 'All Subjects'}</option>
                                         ${data.subjects.filter(s => {
-            if (filterSem) return s.semesterId === filterSem;
-            if (filterYear) {
-                const validSems = data.semesters.filter(sem => sem.yearId === filterYear).map(sem => sem.id);
-                return validSems.includes(s.semesterId);
-            }
-            return true;
-        }).map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
+                                            if (filterSem) return s.semesterId === filterSem;
+                                            if (filterYear) {
+                                                const validSems = data.semesters.filter(sem => sem.yearId === filterYear).map(sem => sem.id);
+                                                return validSems.includes(s.semesterId);
+                                            }
+                                            return true;
+                                        }).map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
                                     </select>
                                 `}
                             </div>
                         `}
 
                         ${editingItem ? html`
-                            <div className="bg-white/70 dark:bg-gray-900/70 p-8 rounded-3xl border-2 border-brand-DEFAULT/20 shadow-inner">
+                            <div key="editing-form-container" className="bg-white/70 dark:bg-gray-900/70 p-8 rounded-3xl border-2 border-brand-DEFAULT/20 shadow-inner">
                                 <div className="flex justify-between items-center mb-8 border-b dark:border-gray-700 pb-4">
                                     <h4 className="text-2xl font-black text-brand-gold">${editingItem.id.includes(activeTab) ? (lang === 'ar' ? 'إنشاء سجل جديد' : 'Create New Record') : (lang === 'ar' ? 'تعديل السجل' : 'Edit Record')}</h4>
                                     ${activeTab === 'quizzes' && html`
-                                        <${Luminova.Components.Button} onClick=${() => setSubView('questionsList')} className="bg-blue-600 hover:bg-blue-700 text-lg px-8 relative overflow-hidden group">
+                                        <${Luminova.Components.Button} key="manage-q-matrix" onClick=${() => setSubView('questionsList')} className="bg-blue-600 hover:bg-blue-700 text-lg px-8 relative overflow-hidden group">
                                             <span className="relative z-10 w-full flex items-center gap-2">📝 Manage Questions Matrix <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">${(editingItem.questions || []).length}</span></span>
                                         </${Luminova.Components.Button}>
                                     `}
@@ -1928,26 +2301,25 @@
                                                     type="text"
                                                     value=${editingItem.lessonUrl || ''}
                                                     onChange=${e => {
-                                                        const val = e.target.value;
-                                                        setEditingItem({ ...editingItem, lessonUrl: val });
-                                                    }}
-                                                    className=${`w-full p-4 rounded-xl bg-white dark:bg-gray-800 border-2 font-mono font-bold outline-none transition-all ${
-                                                        editingItem.lessonUrl && !/\.(jsx|js)$/i.test(editingItem.lessonUrl.trim())
-                                                            ? 'border-red-400 focus:border-red-500 text-red-600 dark:text-red-400'
-                                                            : editingItem.lessonUrl && /\.(jsx|js)$/i.test(editingItem.lessonUrl.trim())
-                                                                ? 'border-green-400 focus:border-green-500 text-green-700 dark:text-green-400'
-                                                                : 'border-gray-200 dark:border-gray-700 focus:border-purple-500'
-                                                    }`}
+                            const val = e.target.value;
+                            setEditingItem({ ...editingItem, lessonUrl: val });
+                        }}
+                                                    className=${`w-full p-4 rounded-xl bg-white dark:bg-gray-800 border-2 font-mono font-bold outline-none transition-all ${editingItem.lessonUrl && !/\.(jsx|js)$/i.test(editingItem.lessonUrl.trim())
+                            ? 'border-red-400 focus:border-red-500 text-red-600 dark:text-red-400'
+                            : editingItem.lessonUrl && /\.(jsx|js)$/i.test(editingItem.lessonUrl.trim())
+                                ? 'border-green-400 focus:border-green-500 text-green-700 dark:text-green-400'
+                                : 'border-gray-200 dark:border-gray-700 focus:border-purple-500'
+                        }`}
                                                     placeholder="lessons/interactive/chapter1-intro.jsx"
                                                     dir="ltr"
                                                 />
                                                 <div className="flex items-center gap-2 mt-3">
                                                     ${editingItem.lessonUrl && /\.(jsx|js)$/i.test(editingItem.lessonUrl.trim()) && !/\s/.test(editingItem.lessonUrl.trim())
-                                                        ? html`<span className="text-green-500 text-sm font-bold flex items-center gap-1">✅ مسار صالح (Valid path)</span>`
-                                                        : editingItem.lessonUrl
-                                                            ? html`<span className="text-red-500 text-sm font-bold flex items-center gap-1">⚠️ يجب أن ينتهي بـ .jsx أو .js بدون مسافات</span>`
-                                                            : html`<span className="text-gray-400 text-xs">يجب أن ينتهي المسار بـ .jsx أو .js — مثال: lessons/physics/force-sim.jsx</span>`
-                                                    }
+                            ? html`<span className="text-green-500 text-sm font-bold flex items-center gap-1">✅ مسار صالح (Valid path)</span>`
+                            : editingItem.lessonUrl
+                                ? html`<span className="text-red-500 text-sm font-bold flex items-center gap-1">⚠️ يجب أن ينتهي بـ .jsx أو .js بدون مسافات</span>`
+                                : html`<span className="text-gray-400 text-xs">يجب أن ينتهي المسار بـ .jsx أو .js — مثال: lessons/physics/force-sim.jsx</span>`
+                        }
                                                 </div>
                                             </div>
                                         ` : html`
@@ -1957,103 +2329,179 @@
                                         `}
                                     ` : activeTab === 'quizzes' ? html`
                                         <div className="col-span-2">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">ناشر الاختبار (Quiz Publisher - للعرض فقط بلا مساهمات)</label>
+                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">ناشر الاختبار (للعرض فقط بلا مساهمات)</label>
                                             <select value=${editingItem.publisherId || ''} onChange=${e => setEditingItem({ ...editingItem, publisherId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-brand-DEFAULT/50 font-bold outline-none ring-0">
                                                 <option value="">-- اختار الناشر ليعرض على غلاف الاختبار --</option>
                                                 ${studentsWithFounder.map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
                                             </select>
                                         </div>
                                         <div className="col-span-2 w-full flex flex-col md:flex-row gap-4">
-                                            <div className="w-full"><${Luminova.Components.Input} label="عنوان الاختبار التفاعلي (عربي)" val=${editingItem.titleAr || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} /></div>
-                                            <div className="w-full"><${Luminova.Components.Input} label="Interactive Quiz Title (English)" val=${editingItem.titleEn || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
+                                            <div className="w-full"><${Luminova.Components.Input} label="عنوان الاختبار التفاعلي" val=${editingItem.titleAr || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} /></div>
+                                            <div className="w-full"><${Luminova.Components.Input} label="عنوان الاختبار التفاعلي باللغة الإنجليزية" val=${editingItem.titleEn || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
                                         </div>
                                         <div className="col-span-1 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white/50 dark:bg-gray-800/50">
-                                            <${Luminova.Components.Input} type="checkbox" label="ترتيب عشوائي للأسئلة (Shuffle)" val=${editingItem.isShuffled || false} onChange=${v => setEditingItem({ ...editingItem, isShuffled: v })} />
+                                            <${Luminova.Components.Input} type="checkbox" label="ترتيب عشوائي للأسئلة" val=${editingItem.isShuffled || false} onChange=${v => setEditingItem({ ...editingItem, isShuffled: v })} />
                                             <p className="text-xs opacity-60 mt-1">يظهر الترتيب بشكل مختلف لكل طالب لزيادة المصداقية.</p>
                                         </div>
                                         <div className="col-span-1 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white/50 dark:bg-gray-800/50">
-                                            <label className="block text-sm font-black mb-2 opacity-80">توقيت ظهور التعليل (Feedback Mode)</label>
+                                            <label className="block text-sm font-black mb-2 opacity-80">توقيت ظهور التعليل</label>
                                             <select value=${editingItem.feedbackMode || 'end'} onChange=${e => setEditingItem({ ...editingItem, feedbackMode: e.target.value })} className="w-full p-3 rounded-xl bg-gray-50 border border-gray-200 dark:bg-gray-900 dark:border-gray-600 font-bold outline-none shadow-sm">
-                                                <option value="end">النتيجة مع التعليل في نهاية الاختبار (At the End)</option>
-                                                <option value="immediate">تجميد فور إجابة كل سؤال وإظهار التعليل (Immediate)</option>
+                                                <option value="end">النتيجة مع التعليل في نهاية الاختبار</option>
+                                                <option value="immediate">تجميد فور إجابة كل سؤال وإظهار التعليل</option>
                                             </select>
                                         </div>
-                                        <div className="col-span-2 mt-6 p-6 border-2 border-brand-gold/50 rounded-2xl bg-gradient-to-br from-amber-50/50 to-orange-50/50 dark:from-amber-900/10 dark:to-orange-900/10 backdrop-blur-xl shadow-lg">
-                                            <h3 className="text-xl font-black text-brand-gold mb-6 flex items-center gap-2">⚙️ الإعدادات المتقدمة (Advanced Settings)</h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                <div className="col-span-2">
-                                                    <${Luminova.Components.Input} label="Webhook URL (رابط حفظ النتيجة المستقل)" val=${editingItem.webhookUrl !== undefined ? editingItem.webhookUrl : 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'} onChange=${v => setEditingItem({ ...editingItem, webhookUrl: v })} />
+
+                                        <!-- الإعدادات المتقدمة (Advanced Settings Redesign) -->
+                                        <div className="col-span-2 mt-8">
+                                            <h3 className="text-2xl font-black text-brand-gold mb-6 flex items-center gap-3 border-b border-brand-gold/20 pb-4">⚙️ الإعدادات المتقدمة</h3>
+                                            <div className="space-y-6">
+
+                                                <!-- Card 1: إعدادات الربط والتقييم -->
+                                                <div className="bg-slate-800/50 dark:bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                                    <h4 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><span className="text-brand-DEFAULT">🔗</span> إعدادات الربط والتقييم</h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                        <div className="col-span-2">
+                                                            <${Luminova.Components.Input} label="رابط Webhook (Google Apps Script)" val=${editingItem.webhookUrl !== undefined ? editingItem.webhookUrl : ''} onChange=${v => setEditingItem({ ...editingItem, webhookUrl: v })} />
+                                                        </div>
+                                                        <div className="col-span-2">
+                                                            <${Luminova.Components.Input} label="Google Sheet Name" val=${editingItem.sheetName || 'Sheet1'} onChange=${v => setEditingItem({ ...editingItem, sheetName: v })} />
+                                                        </div>
+                                                        <div className="col-span-1">
+                                                            <label className="block text-sm font-black mb-3 text-gray-300">نظام التقييم</label>
+                                                            <select value=${editingItem.examMode || 'practice'} onChange=${e => setEditingItem({ ...editingItem, examMode: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                                <option value="practice">تدريبي</option>
+                                                                <option value="evaluation">تقييمي</option>
+                                                            </select>
+                                                            ${editingItem.examMode === 'evaluation' && html`
+                                                                <div className="mt-4">
+                                                                    <button onClick=${handleBulkSendReports} disabled=${isSendingBulk} className="w-full p-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black shadow-[0_0_15px_rgba(79,70,229,0.5)] hover:shadow-[0_0_25px_rgba(79,70,229,0.7)] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:grayscale">
+                                                                        ${isSendingBulk ? html`<span className="animate-spin text-xl">🔄</span> جاري الإرسال...` : html`<span>📤</span> إرسال التقارير الشاملة لجميع الطلاب (يدوياً)`}
+                                                                    </button>
+                                                                    ${bulkSendStatus && html`
+                                                                        <div className=${`mt-3 p-3 rounded-xl text-sm font-black border ${bulkSendStatus.state === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-300' : bulkSendStatus.state === 'loading' ? 'bg-blue-500/10 border-blue-500/30 text-blue-300' : 'bg-green-500/10 border-green-500/30 text-green-300'}`}>
+                                                                            ${bulkSendStatus.msg}
+                                                                        </div>
+                                                                    `}
+                                                                </div>
+                                                            `}
+                                                        </div>
+                                                        ${editingItem.examMode === 'evaluation' && html`
+                                                            <div className="col-span-1 space-y-6">
+                                                                <div>
+                                                                    <label className="block text-sm font-black mb-3 text-gray-300">سياسة البريد الإلكتروني</label>
+                                                                    <select value=${editingItem.emailPolicy || 'none'} onChange=${e => setEditingItem({ ...editingItem, emailPolicy: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                                        <option value="none">لا إرسال</option>
+                                                                        <option value="score_only">الدرجة فقط</option>
+                                                                        <option value="answers_only">الإجابات فقط</option>
+                                                                        <option value="full_report">تقرير كامل</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-black mb-3 text-brand-gold">إظهار النتيجة والإجابات بعد التسليم</label>
+                                                                    <select value=${editingItem.showResultsAfter ? 'yes' : 'no'} onChange=${e => setEditingItem({ ...editingItem, showResultsAfter: e.target.value === 'yes' })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-brand-gold/50 text-brand-gold font-bold outline-none focus:border-brand-gold transition-all">
+                                                                        <option value="no">لا</option>
+                                                                        <option value="yes">نعم</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                        `}
+                                                    </div>
                                                 </div>
-                                                <div className="col-span-1">
-                                                    <label className="block text-sm font-black mb-2 opacity-80">نظام الاختبار (Exam Mode)</label>
-                                                    <select value=${editingItem.examMode || 'practice'} onChange=${e => setEditingItem({ ...editingItem, examMode: e.target.value })} className="w-full p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-bold outline-none shadow-sm focus:border-brand-gold">
-                                                        <option value="practice">تدريبي (Practice)</option>
-                                                        <option value="evaluation">تقييمي (Evaluation)</option>
-                                                    </select>
+
+                                                <!-- Card 2: إعدادات الوقت والتأخير -->
+                                                <div className="bg-slate-800/50 dark:bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                                    <h4 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><span className="text-brand-DEFAULT">⏳</span> إعدادات الوقت والتأخير</h4>
+                                                    ${editingItem.examMode === 'evaluation' ? html`
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                            <div className="col-span-1">
+                                                                <label className="block text-sm font-black mb-3 text-gray-300">وقت البدء</label>
+                                                                <input type="datetime-local" value=${editingItem.startTime || ''} onChange=${e => setEditingItem({ ...editingItem, startTime: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
+                                                            </div>
+                                                            <div className="col-span-1">
+                                                                <label className="block text-sm font-black mb-3 text-gray-300">وقت الانتهاء</label>
+                                                                <input type="datetime-local" value=${editingItem.endTime || ''} onChange=${e => setEditingItem({ ...editingItem, endTime: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
+                                                            </div>
+                                                            <div className="col-span-2">
+                                                                <label className="block text-sm font-black mb-3 text-gray-300">سياسة التأخير</label>
+                                                                <select value=${editingItem.latePolicy || 'hard_stop'} onChange=${e => setEditingItem({ ...editingItem, latePolicy: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                                    <option value="hard_stop">منع التسليم</option>
+                                                                    <option value="grace_period">تحديد كمتأخر</option>
+                                                                </select>
+                                                            </div>
+                                                            <div className="col-span-2">
+                                                                <p className="text-sm text-brand-gold font-bold bg-brand-gold/10 p-4 rounded-xl border border-brand-gold/20 flex items-center gap-3">
+                                                                    <span className="text-xl">⚠️</span> يتم حساب الوقت بدقة بناءً على توقيت القاهرة الفعلي (عبر الإنترنت) متجاهلاً إعدادات جهاز الطالب.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    ` : html`
+                                                        <div className="text-center p-6 bg-slate-800 rounded-xl border border-slate-700/50 text-gray-400 font-bold">
+                                                            إعدادات الوقت والتأخير متاحة فقط في النظام التقييمي.
+                                                        </div>
+                                                    `}
                                                 </div>
-                                                <div className="col-span-1 flex items-center justify-start mt-6">
-                                                    <${Luminova.Components.Input} type="checkbox" label="السماح بالرجوع للسابق (Allow Back Nav)" val=${editingItem.allowBackNavigation !== undefined ? editingItem.allowBackNavigation : true} onChange=${v => setEditingItem({ ...editingItem, allowBackNavigation: v })} />
-                                                </div>
-                                                ${editingItem.examMode === 'evaluation' && html`
-                                                    <div className="col-span-1">
-                                                        <label className="block text-sm font-black mb-2 opacity-80 text-brand-gold">إظهار النتيجة والإجابات بعد التسليم؟ (Show results after?)</label>
-                                                        <select value=${editingItem.showResultsAfter ? 'yes' : 'no'} onChange=${e => setEditingItem({ ...editingItem, showResultsAfter: e.target.value === 'yes' })} className="w-full p-3 rounded-xl bg-white dark:bg-gray-900 border border-brand-gold/30 font-bold outline-none shadow-sm focus:border-brand-gold text-brand-gold">
-                                                            <option value="no">لا (No)</option>
-                                                            <option value="yes">نعم (Yes)</option>
-                                                        </select>
-                                                    </div>
-                                                    <div className="col-span-1">
-                                                        <label className="block text-sm font-black mb-2 opacity-80">سياسة البريد الإلكتروني (Email Policy)</label>
-                                                        <select value=${editingItem.emailPolicy || 'none'} onChange=${e => setEditingItem({ ...editingItem, emailPolicy: e.target.value })} className="w-full p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-bold outline-none shadow-sm focus:border-brand-gold">
-                                                            <option value="none">لا إرسال (None)</option>
-                                                            <option value="score_only">الدرجة فقط (Score Only)</option>
-                                                            <option value="answers_only">الإجابات فقط (Answers Only)</option>
-                                                            <option value="full_report">تقرير كامل (Full Report)</option>
-                                                        </select>
-                                                    </div>
-                                                    <div className="col-span-1">
-                                                        <label className="block text-sm font-black mb-2 opacity-80">سياسة التأخير (Late Policy)</label>
-                                                        <select value=${editingItem.latePolicy || 'hard_stop'} onChange=${e => setEditingItem({ ...editingItem, latePolicy: e.target.value })} className="w-full p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-bold outline-none shadow-sm focus:border-brand-gold">
-                                                            <option value="hard_stop">منع الدخول (Hard Stop)</option>
-                                                            <option value="grace_period">السماح مع وضع علامة متأخر (Grace Period)</option>
-                                                        </select>
-                                                    </div>
-                                                    <div className="col-span-1">
-                                                        <label className="block text-sm font-black mb-2 opacity-80">وقت البدء (Start Time)</label>
-                                                        <input type="datetime-local" value=${editingItem.startTime || ''} onChange=${e => setEditingItem({ ...editingItem, startTime: e.target.value })} className="w-full p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-bold outline-none shadow-sm focus:border-brand-gold" />
-                                                    </div>
-                                                    <div className="col-span-1">
-                                                        <label className="block text-sm font-black mb-2 opacity-80">وقت الانتهاء (End Time)</label>
-                                                        <input type="datetime-local" value=${editingItem.endTime || ''} onChange=${e => setEditingItem({ ...editingItem, endTime: e.target.value })} className="w-full p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-bold outline-none shadow-sm focus:border-brand-gold" />
-                                                    </div>
-                                                    <div className="col-span-2 w-full space-y-3">
-                                                        <div className="flex justify-between items-center">
-                                                            <label className="block text-sm font-black opacity-80">إيميلات الإدارة (Admin Emails)</label>
-                                                            <button onClick=${() => {
+
+                                                <!-- Card 3: ضوابط الدخول والوصول -->
+                                                <div className="bg-slate-800/50 dark:bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                                    <h4 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><span className="text-brand-DEFAULT">🛡️</span> ضوابط الدخول والوصول</h4>
+                                                    
+                                                    <div className="space-y-6">
+                                                        <div className="p-4 bg-slate-800 dark:bg-slate-900 rounded-xl border border-slate-600">
+                                                            <div className="flex items-center gap-3">
+                                                                <input type="checkbox" checked=${editingItem.allowBackNavigation !== undefined ? editingItem.allowBackNavigation : true} onChange=${e => setEditingItem({ ...editingItem, allowBackNavigation: e.target.checked })} className="w-6 h-6 accent-brand-DEFAULT rounded" />
+                                                                <label className="text-sm font-black text-white cursor-pointer" onClick=${() => setEditingItem({ ...editingItem, allowBackNavigation: !(editingItem.allowBackNavigation !== undefined ? editingItem.allowBackNavigation : true) })}>السماح بالرجوع للسؤال السابق</label>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="p-4 bg-slate-800 dark:bg-slate-900 rounded-xl border border-slate-600">
+                                                            <div className="flex items-center gap-3">
+                                                                <input type="checkbox" checked=${editingItem.sendDetailedReport !== undefined ? editingItem.sendDetailedReport : false} onChange=${e => setEditingItem({ ...editingItem, sendDetailedReport: e.target.checked })} className="w-6 h-6 accent-brand-DEFAULT rounded" />
+                                                                <label className="text-sm font-black text-white cursor-pointer" onClick=${() => setEditingItem({ ...editingItem, sendDetailedReport: !(editingItem.sendDetailedReport !== undefined ? editingItem.sendDetailedReport : false) })}>إرسال تقرير مفصل للطالب عبر البريد</label>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="p-5 bg-slate-800 dark:bg-slate-900 rounded-xl border border-brand-DEFAULT/30">
+                                                            <label className="block text-sm font-black mb-4 text-brand-DEFAULT">حقول بوابة الدخول الإلزامية</label>
+                                                            <div className="flex flex-col sm:flex-row gap-6">
+                                                                <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-300">الاسم</span></label>
+                                                                <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-300">الشعبة</span></label>
+                                                                <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-300">البريد الإلكتروني</span></label>
+                                                            </div>
+                                                            <p className="text-xs text-brand-DEFAULT/60 mt-4 font-bold">هذه الحقول إجبارية ويتم تطبيقها تلقائياً عند التسجيل.</p>
+                                                        </div>
+
+                                                        ${editingItem.examMode === 'evaluation' && html`
+                                                            <div className="pt-4 border-t border-slate-700">
+                                                                <div className="flex justify-between items-center mb-4">
+                                                                    <label className="block text-sm font-black text-white">إيميلات الإدارة</label>
+                                                                    <button onClick=${() => {
                             const arr = (editingItem.adminEmails || '').split(',').filter(Boolean);
                             arr.push('');
                             setEditingItem({ ...editingItem, adminEmails: arr.join(',') });
-                        }} className="px-4 py-1.5 bg-gradient-to-r from-brand-gold to-yellow-500 text-black text-sm rounded-full font-bold shadow-lg hover:scale-105 transition-transform">+ إضافة إيميل</button>
-                                                        </div>
-                                                        ${((editingItem.adminEmails || '').split(',').length === 0 ? [''] : (editingItem.adminEmails || '').split(',')).map((em, idx, arr) => html`
-                                                            <div key=${idx} className="flex gap-2 items-center w-full">
-                                                                <div className="flex-1">
-                                                                    <${Luminova.Components.Input} val=${em} onChange=${v => {
-                                const newArr = [...arr];
-                                newArr[idx] = v;
-                                setEditingItem({ ...editingItem, adminEmails: newArr.join(',') });
-                            }} />
+                        }} className="px-5 py-2 bg-gradient-to-r from-brand-DEFAULT to-brand-hover text-white text-sm rounded-full font-bold shadow-lg hover:shadow-brand-DEFAULT/50 transition-all">+ إضافة إيميل</button>
                                                                 </div>
-                                                                ${arr.length > 1 && html`
-                                                                    <button onClick=${() => {
+                                                                <div className="space-y-3">
+                                                                    ${((editingItem.adminEmails || '').split(',').length === 0 ? [''] : (editingItem.adminEmails || '').split(',')).map((em, idx, arr) => html`
+                                                                        <div key=${idx} className="flex gap-3 items-center">
+                                                                            <input type="email" value=${em} placeholder="admin@example.com" onChange=${e => {
+                                const newArr = [...arr];
+                                newArr[idx] = e.target.value;
+                                setEditingItem({ ...editingItem, adminEmails: newArr.join(',') });
+                            }} className="flex-1 p-4 rounded-xl bg-slate-800 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
+                                                                            ${arr.length > 1 && html`
+                                                                                <button onClick=${() => {
                                     const newArr = arr.filter((_, i) => i !== idx);
                                     setEditingItem({ ...editingItem, adminEmails: newArr.join(',') });
-                                }} className="p-4 text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-xl transition-colors"><${Luminova.Icons.Trash} /></button>
-                                                                `}
+                                }} className="p-4 text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-xl transition-all shadow-sm"><${Luminova.Icons.Trash} /></button>
+                                                                            `}
+                                                                        </div>
+                                                                    `)}
+                                                                </div>
                                                             </div>
-                                                        `)}
+                                                        `}
                                                     </div>
-                                                `}
+                                                </div>
+
                                             </div>
                                         </div>
                                     ` : html`
@@ -2074,7 +2522,7 @@
                                 </div>
                             </div>
                         ` : activeTab === 'merger' ? html`
-                            <div className="p-4 sm:p-8 animate-fade-in">
+                            <div key="merger-tab-container" className="p-4 sm:p-8 animate-fade-in">
                                 <div className="mb-10 text-center">
                                     <h4 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-brand-DEFAULT to-brand-gold mb-2">
                                         ${lang === 'ar' ? 'دمج الملفات الذكي' : 'Smart Data Merger'}
@@ -2127,11 +2575,11 @@
                                             </h5>
                                             
                                             <div onDragOver=${e => e.preventDefault()} onDrop=${handleFileDrop} className="relative group">
-                                                <input type="file" onChange=${handleFileDrop} className="absolute inset-0 opacity-0 cursor-pointer z-10" accept=".js" />
+                                                <input type="file" onChange=${handleFileDrop} className="absolute inset-0 opacity-0 cursor-pointer z-10" accept=".js,.json" />
                                                 <div className="border-4 border-dashed border-gray-200 dark:border-gray-800 rounded-3xl p-10 text-center transition-all group-hover:border-brand-gold/50 group-hover:bg-brand-gold/5">
                                                     <div className="text-4xl mb-4 group-hover:scale-110 transition-transform">📂</div>
                                                     <div className="font-black opacity-60">${lang === 'ar' ? 'اسحب الملف هنا أو اضغط للاختيار' : 'Drag & Drop file or click to browse'}</div>
-                                                    <div className="text-xs mt-2 text-brand-gold font-bold">Only .js files accepted</div>
+                                                    <div className="text-xs mt-2 text-brand-gold font-bold">.js and .json files accepted</div>
                                                 </div>
                                             </div>
 
@@ -2169,7 +2617,7 @@
                                 `}
                             </div>
                         ` : html`
-                            <div className="p-2 sm:p-4 space-y-3">
+                            <div key="table-list-container" className="p-2 sm:p-4 space-y-3">
                                     ${displayedTableItems.map(item => {
                                     const subject = data.subjects?.find(s => s.id === item.subjectId);
                                     const year = activeTab === 'semesters' ? data.years?.find(y => y.id === item.yearId) : null;
@@ -2194,10 +2642,10 @@
                                             
                                             <div className="font-black text-lg sm:text-xl text-gray-900 dark:text-white leading-tight mb-2">
                                                 ${item.titleAr || item.nameAr || item.name || item.titleEn || item.nameEn || item.title || 'N/A'}
-                                                ${item.isVIP && html`<span className="ms-2 text-brand-DEFAULT animate-pulse">✨</span>`}
-                                                ${item.isFeatured && html`<span className="ms-2 text-brand-gold">📌</span>`}
-                                                ${item.isVerified && html`<span className="ms-2 text-blue-500">🔵✔️</span>`}
-                                                ${item.role === 'doctor' && html`<span className="ms-2 text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full font-black">🎓</span>`}
+                                                ${item.isVIP && html`<span key="vip" className="ms-2 text-brand-DEFAULT animate-pulse">✨</span>`}
+                                                ${item.isFeatured && html`<span key="featured" className="ms-2 text-brand-gold">📌</span>`}
+                                                ${item.isVerified && html`<span key="verified" className="ms-2 text-blue-500">🔵✔️</span>`}
+                                                ${item.role === 'doctor' && html`<span key="doctor" className="ms-2 text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full font-black">🎓</span>`}
                                             </div>
 
                                             <div className="flex flex-wrap gap-2 mt-3">
@@ -2233,7 +2681,7 @@
 
                                         <div className="flex gap-2 shrink-0 justify-end mt-4 sm:mt-0">
                                             ${activeTab === 'quizzes' && html`
-                                                <button onClick=${() => { setEditingItem({ ...item }); setSubView('questionsList'); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 text-indigo-500 rounded-xl hover:bg-indigo-500 hover:text-white transition-all font-black text-sm border border-indigo-500/20 shadow-sm">
+                                                <button key="manage-questions" onClick=${() => { setEditingItem({ ...item }); setSubView('questionsList'); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 text-indigo-500 rounded-xl hover:bg-indigo-500 hover:text-white transition-all font-black text-sm border border-indigo-500/20 shadow-sm">
                                                     <span>📝</span>
                                                     <span className="bg-indigo-500/20 px-2 py-0.5 rounded-full text-[10px]">${(item.questions || []).length}</span>
                                                 </button>
@@ -2284,14 +2732,14 @@
             const fetchInitialData = async () => {
                 setLoadingMsg('Fetching Data... Please wait');
                 try {
-                    const fetchAndEval = async (url, fallbackScript) => {
+                    const fetchAndLoad = async (url, fallbackScript) => {
+                        const target = fallbackScript === 'data.js' ? 'data' : fallbackScript === 'exam.js' ? 'exams' : 'certs';
                         if (url && url !== "PASTE_YOUR_DATA_URL_HERE" && url !== "PASTE_YOUR_EXAM_URL_HERE" && url !== "PASTE_YOUR_CERTS_URL_HERE") {
                             try {
                                 const res = await fetch(url + '?t=' + new Date().getTime());
                                 if (!res.ok) throw new Error('Fetch failed');
                                 const text = await res.text();
-                                // Execute the code in global scope
-                                new Function(text)();
+                                assignLuminovaPayload(target, parseLuminovaPayload(text, target));
                                 return true;
                             } catch (e) {
                                 console.warn('Failed to fetch from GitHub URL:', url, e);
@@ -2308,9 +2756,9 @@
                         });
                     };
 
-                    await fetchAndEval(DATA_URL, 'data.js');
-                    await fetchAndEval(EXAM_URL, 'exam.js');
-                    await fetchAndEval(CERTS_URL, 'certificates.js');
+                    await fetchAndLoad(DATA_URL, 'data.js');
+                    await fetchAndLoad(EXAM_URL, 'exam.js');
+                    await fetchAndLoad(CERTS_URL, 'certificates.js');
 
                     // Wait a moment for global vars to settle
                     setTimeout(() => {
@@ -2353,7 +2801,7 @@
 
         if (loadingMsg) {
             return html`
-            <div className="min-h-screen flex items-center justify-center flex-col gap-6 bg-slate-950 text-white relative overflow-hidden">
+            <div key="loading-screen" className="min-h-screen flex items-center justify-center flex-col gap-6 bg-slate-950 text-white relative overflow-hidden">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(6,182,212,0.15),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(251,191,36,0.1),transparent_50%)]"></div>
                 <div className="relative">
                     <div className="w-20 h-20 border-4 border-brand-DEFAULT/30 border-t-brand-DEFAULT rounded-full animate-spin"></div>
@@ -2366,7 +2814,7 @@
 
         if (!loginState.loggedIn) {
             return html`
-            <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white relative overflow-hidden px-4">
+            <div key="login-screen" className="min-h-screen flex items-center justify-center bg-slate-950 text-white relative overflow-hidden px-4">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(6,182,212,0.2),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(251,191,36,0.12),transparent_50%)]"></div>
                 <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-brand-DEFAULT/5 rounded-full blur-3xl animate-pulse"></div>
                 <div className="absolute bottom-1/4 right-1/4 w-72 h-72 bg-brand-gold/5 rounded-full blur-3xl animate-pulse" style=${{ animationDelay: '1s' }}></div>
@@ -2407,10 +2855,10 @@
 
         // Render the AdminCMS component
         return html`
-        <div className="min-h-screen relative bg-slate-50 dark:bg-slate-950">
+        <div key="admin-cms-main" className="min-h-screen relative bg-slate-50 dark:bg-slate-950">
             <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,rgba(6,182,212,0.04),transparent_50%)] pointer-events-none z-0"></div>
             ${loginState.role === 'editor' && html`
-                <div className="fixed bottom-4 start-4 z-50 flex items-center gap-2 bg-amber-500/90 backdrop-blur-xl text-black px-4 py-2 rounded-full shadow-lg shadow-amber-500/20 font-black text-xs sm:text-sm cursor-default group" title="Blind Addition Mode: You can only add new items. Existing data is hidden.">
+                <div key="editor-mode-badge" className="fixed bottom-4 start-4 z-50 flex items-center gap-2 bg-amber-500/90 backdrop-blur-xl text-black px-4 py-2 rounded-full shadow-lg shadow-amber-500/20 font-black text-xs sm:text-sm cursor-default group" title="Blind Addition Mode: You can only add new items. Existing data is hidden.">
                     <span className="text-lg">👁️‍🗨️</span>
                     <span className="hidden sm:inline">EDITOR MODE</span>
                     <span className="w-2 h-2 bg-black/30 rounded-full animate-pulse"></span>
