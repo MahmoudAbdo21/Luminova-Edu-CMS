@@ -2648,6 +2648,21 @@
                                                 ${item.role === 'doctor' && html`<span key="doctor" className="ms-2 text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full font-black">🎓</span>`}
                                             </div>
 
+                                            ${activeTab === 'certificates' && html`
+                                                <div className="flex flex-wrap items-center gap-3 mt-2 mb-1">
+                                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm text-sm font-bold text-gray-700 dark:text-gray-200">
+                                                        <span className="opacity-60 text-lg">🎓</span>
+                                                        <span>${lang === 'ar' ? 'الطالب:' : 'Student:'}</span>
+                                                        <span className="text-brand-DEFAULT">${item.studentName || item.studentNameEn}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm text-sm font-bold">
+                                                        <span className="opacity-60 text-lg">🏆</span>
+                                                        <span className="text-gray-700 dark:text-gray-200">${lang === 'ar' ? 'الدرجة:' : 'Level:'}</span>
+                                                        ${item.level === 'gold' ? html`<span className="text-brand-gold drop-shadow-sm">ذهبية 🏅</span>` : item.level === 'silver' ? html`<span className="text-gray-400 drop-shadow-sm">فضية 🥈</span>` : html`<span className="text-gray-500 drop-shadow-sm">عادية 📜</span>`}
+                                                    </div>
+                                                </div>
+                                            `}
+
                                             <div className="flex flex-wrap gap-2 mt-3">
                                                 ${subjectYear && subjectSemester && html`
                                                     <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
