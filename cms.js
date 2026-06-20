@@ -1,13 +1,13 @@
 (function () {
     "use strict";
 
-    // --- HARDCODED GITHUB URLS ---
+    // --- روابط جت هب الثابتة ---
     const DATA_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/data.js";
     const EXAM_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/exam.js";
     const CERTS_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/certificates.js";
 
     // ==========================================
-    // PART 1: Core Utilities, i18n, Icons, Atoms
+    // الجزء 1: أدوات أساسية وترجمة وأيقونات ومكونات
     // ==========================================
     var { useState, useEffect, useMemo, useCallback } = window.React;
     var html = window.htm.bind(window.React.createElement);
@@ -23,15 +23,343 @@
 
     const normalizeText = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
+    const makeQuestionPreview = (text, maxLength = 160) => {
+        const value = String(text || "").trim();
+        if (value.length <= maxLength) return value;
+        return value.slice(0, maxLength).trim() + "...";
+    };
+
+    const normalizeSearchText = (value) =>
+        String(value || "")
+            .toLowerCase()
+            .trim();
+
+    const questionMatchesSearch = (question, query) => {
+        const q = normalizeSearchText(query);
+        if (!q) return true;
+
+        const optionsText = Array.isArray(question.options)
+            ? question.options.map(opt =>
+                typeof opt === "object" && opt !== null
+                    ? [opt.text, opt.label, opt.value, opt.id].join(" ")
+                    : String(opt || "")
+            ).join(" ")
+            : "";
+
+        const searchBody = [
+            question.questionId,
+            question.id,
+            question.uuid,
+            question.questionText,
+            question.text,
+            question.textAr,
+            question.title,
+            question.prompt,
+            optionsText,
+            question.modelAnswer,
+            question.correctAnswerText,
+            question.answer,
+            question.explanation,
+            question.feedback,
+            Array.isArray(question.acceptedAnswers) ? question.acceptedAnswers.join(" ") : "",
+            Array.isArray(question.correctAnswers) ? question.correctAnswers.join(" ") : "",
+            Array.isArray(question.correctOptionIds) ? question.correctOptionIds.join(" ") : ""
+        ].join(" ").toLowerCase();
+
+        return searchBody.includes(q);
+    };
+
+    const resolveModelAnswerForPrepare = (question) => {
+        const asText = (value) => {
+            if (value === null || value === undefined) return "";
+            if (typeof value === "string") return value.trim();
+            if (typeof value === "number" || typeof value === "boolean") return String(value);
+            if (Array.isArray(value)) {
+                return value.map(asText).filter(Boolean).join(" | ");
+            }
+            if (typeof value === "object") {
+                return String(
+                    value.text ??
+                    value.label ??
+                    value.name ??
+                    value.title ??
+                    value.value ??
+                    value.id ??
+                    ""
+                ).trim();
+            }
+            return "";
+        };
+
+        const options = Array.isArray(question.options) ? question.options : [];
+
+        const optionRecords = options.map((opt, index) => {
+            if (Array.isArray(opt)) {
+                return {
+                    index,
+                    id: asText(opt[0]),
+                    value: asText(opt[0]),
+                    key: asText(opt[0]),
+                    text: asText(opt[1] ?? opt[0]),
+                    letter: String.fromCharCode(65 + index)
+                };
+            }
+
+            if (typeof opt === "object" && opt) {
+                return {
+                    index,
+                    id: asText(opt.id),
+                    value: asText(opt.value),
+                    key: asText(opt.key),
+                    text: asText(opt.text ?? opt.label ?? opt.name ?? opt.title ?? opt.value ?? opt.id),
+                    letter: String.fromCharCode(65 + index)
+                };
+            }
+
+            return {
+                index,
+                id: String(index),
+                value: String(index),
+                key: String(index),
+                text: asText(opt),
+                letter: String.fromCharCode(65 + index)
+            };
+        });
+
+        const resolveOptionText = (candidate) => {
+            const raw = asText(candidate);
+            if (!raw) return "";
+
+            const match = optionRecords.find((opt) => {
+                return (
+                    String(opt.id) === raw ||
+                    String(opt.value) === raw ||
+                    String(opt.key) === raw ||
+                    String(opt.index) === raw ||
+                    String(opt.letter).toLowerCase() === raw.toLowerCase()
+                );
+            });
+
+            if (match && match.text) return match.text;
+
+            return "";
+        };
+
+        const resolveArray = (values) => {
+            if (!Array.isArray(values)) return "";
+
+            const resolved = values
+                .map((value) => resolveOptionText(value) || asText(value))
+                .filter(Boolean);
+
+            return resolved.join(" | ");
+        };
+
+        const fromCorrectOptionIds = resolveArray(question.correctOptionIds);
+        if (fromCorrectOptionIds) return fromCorrectOptionIds;
+
+        const fromAcceptedAnswers = resolveArray(question.acceptedAnswers);
+        if (fromAcceptedAnswers) return fromAcceptedAnswers;
+
+        const fromCorrectAnswers = resolveArray(question.correctAnswers);
+        if (fromCorrectAnswers) return fromCorrectAnswers;
+
+        const direct =
+            asText(question.modelAnswer) ||
+            asText(question.correctAnswerText) ||
+            asText(question.answer);
+
+        if (direct) {
+            const mapped = resolveOptionText(direct);
+            return mapped || direct;
+        }
+
+        return "";
+    };
+
+    const buildPrepareExamQuestions = (questions = []) => {
+        return (Array.isArray(questions) ? questions : []).map((q, index) => {
+            const questionId = String(q.questionId ?? q.id ?? q.uuid ?? `q_${index + 1}`);
+            const resolvedModelAnswer = resolveModelAnswerForPrepare(q);
+            
+            console.log("[Luminova Prepare ModelAnswer]", {
+                questionId: questionId,
+                resolvedModelAnswer: resolvedModelAnswer,
+                type: q.type || "mcq"
+            });
+            
+            return {
+                questionId: questionId,
+                originalIndex: Number(q.originalIndex ?? q.original_index ?? q.index ?? index),
+                type: String(q.type || "mcq"),
+                questionText: String(q.questionText ?? q.text ?? q.textAr ?? q.title ?? q.prompt ?? ""),
+                modelAnswer: resolvedModelAnswer,
+                explanation: String(q.explanation ?? q.feedback ?? q.reason ?? ""),
+                maxPoints: Number(q.maxPoints ?? q.points ?? q.score ?? 1),
+                acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers.map(String) : [],
+                correctOptionIds: Array.isArray(q.correctOptionIds) ? q.correctOptionIds.map(String) : []
+            };
+        });
+    };
+
     const stripTrailingSemicolon = (value) => String(value || '').trim().replace(/;\s*$/, '').trim();
+
+    const decodeLxp2ExamPackForCms = (pack) => {
+        if (!pack || pack.v !== 2 || pack.alg !== "luminova-lxp-v2") {
+            throw new Error("Invalid Luminova LXP2 exam pack.");
+        }
+
+        const base64UrlToBase64 = (value) => {
+            let base64 = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+            while (base64.length % 4) base64 += "=";
+            return base64;
+        };
+
+        const base64UrlToBytes = (value) => {
+            const binary = atob(base64UrlToBase64(value));
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes;
+        };
+
+        const decodeUtf8 = (bytes) => {
+            return new TextDecoder().decode(bytes);
+        };
+
+        const unpackQuestion = (q) => ({
+            questionId: q?.[0] || "",
+            id: q?.[0] || "",
+            originalIndex: Number(q?.[1] || 0),
+            type: q?.[2] || "mcq",
+            questionText: q?.[3] || "",
+            text: q?.[3] || "",
+            textAr: q?.[3] || "",
+            prompt: q?.[3] || "",
+            options: Array.isArray(q?.[4])
+                ? q[4].map(opt => (Array.isArray(opt) ? (opt[1] || opt[0] || "") : (opt || "")))
+                : [],
+            maxPoints: Number(q?.[5] || 1),
+            score: Number(q?.[5] || 1),
+            points: Number(q?.[5] || 1),
+            modelAnswer: q?.[6] || "",
+            correctAnswerText: q?.[6] || "",
+            explanation: q?.[7] || "",
+            feedback: q?.[7] || "",
+            correctAnswers: Array.isArray(q?.[8]) ? q[8] : [],
+            correctOptionIds: Array.isArray(q?.[9]) ? q[9] : [],
+            acceptedAnswers: Array.isArray(q?.[10]) ? q[10] : []
+        });
+
+        const unpackExam = (e) => {
+            const rawStatus = e?.[18] || "";
+            const pubStatus = String(rawStatus).trim().toLowerCase();
+            const isPub = pubStatus !== "draft" && pubStatus !== "disabled" && pubStatus !== "inactive" && pubStatus !== "false";
+            const settings = e?.[19] || {};
+
+            return {
+                schemaVersion: 2,
+                quizId: e?.[0] || "",
+                id: e?.[0] || "",
+                code: e?.[0] || "",
+                title: e?.[1] || "",
+                titleAr: e?.[2] || e?.[1] || "",
+                titleEn: e?.[3] || e?.[1] || "",
+                examMode: e?.[4] || "practice",
+                mode: e?.[4] || "practice",
+                webhookUrl: e?.[5] || "",
+                resultSpreadsheetId: e?.[6] || "",
+                spreadsheetId: e?.[6] || "",
+                sheetName: e?.[7] || "",
+                schemaHash: e?.[8] || "",
+                preparedSchemaHash: e?.[9] || e?.[8] || "",
+                expectedQuestionCount: Number(e?.[10] || 0),
+                maxScore: Number(e?.[11] || 0),
+                questions: Array.isArray(e?.[12]) ? e[12].map(unpackQuestion) : [],
+                subjectId: e?.[13] || "",
+                subject_id: e?.[13] || "",
+                courseId: e?.[13] || "",
+                categoryId: e?.[14] || "",
+                levelId: e?.[15] || "",
+                duration: Number(e?.[16] || 0),
+                timeLimit: Number(e?.[16] || 0),
+                passingScore: Number(e?.[17] || 0),
+                status: rawStatus || "published",
+                publishStatus: rawStatus || "published",
+                isPublished: isPub,
+                published: isPub,
+                isActive: isPub,
+                active: isPub,
+                visible: isPub,
+                enabled: isPub,
+
+                // Settings Contract
+                duplicatePolicy: settings.duplicatePolicy || "prevent_by_email",
+                allowRetakes: settings.allowRetakes !== undefined ? !!settings.allowRetakes : false,
+                maxAttempts: settings.maxAttempts !== undefined && settings.maxAttempts !== null ? Number(settings.maxAttempts) : 1,
+                showResult: settings.showResult !== undefined ? !!settings.showResult : (settings.showResultsAfter !== undefined ? !!settings.showResultsAfter : true),
+                resultDisplayMode: settings.resultDisplayMode || "score_with_answers_and_explanations",
+                showScore: settings.showScore !== undefined ? !!settings.showScore : true,
+                showPercentage: settings.showPercentage !== undefined ? !!settings.showPercentage : true,
+                showCorrectAnswers: settings.showCorrectAnswers !== undefined ? !!settings.showCorrectAnswers : true,
+                showModelAnswers: settings.showModelAnswers !== undefined ? !!settings.showModelAnswers : true,
+                showExplanations: settings.showExplanations !== undefined ? !!settings.showExplanations : true,
+                allowReviewAfterSubmit: settings.allowReviewAfterSubmit !== undefined ? !!settings.allowReviewAfterSubmit : true
+            };
+        };
+
+        const chunks = Array.isArray(pack.chunks) ? [...pack.chunks].reverse() : [];
+        const payloadBase64 = chunks.join("");
+        if (String(payloadBase64.length) !== String(pack.checksum || "")) {
+            throw new Error("Invalid Luminova exam pack checksum.");
+        }
+        const payloadBytes = base64UrlToBytes(payloadBase64);
+        const saltBytes = base64UrlToBytes(pack.salt);
+        if (!saltBytes.length) {
+            throw new Error("Invalid Luminova exam pack salt.");
+        }
+        for (let i = 0; i < payloadBytes.length; i++) {
+            payloadBytes[i] ^= saltBytes[i % saltBytes.length];
+        }
+        const json = decodeUtf8(payloadBytes);
+        const payload = JSON.parse(json);
+        if (!Array.isArray(payload) || payload[0] !== "LXP2" || !Array.isArray(payload[1])) {
+            throw new Error("Invalid Luminova exam pack payload.");
+        }
+        return payload[1].map(unpackExam);
+    };
 
     const parseLuminovaPayload = (text, target) => {
         const schema = FILE_SCHEMAS[target];
-        if (!schema) throw new Error(`Unknown data target: ${target}`);
+        if (!schema) throw new Error(`نوع بيانات غير معروف: ${target}`);
 
         const raw = String(text || '').replace(/^\uFEFF/, '').trim();
+
+        if (target === 'exams') {
+            const packRegex = /(?:window\.)?__LUMINOVA_EXAM_PACK__\s*=\s*(\{[\s\S]*?\})\s*;?\s*$/;
+            const packMatch = raw.match(packRegex);
+            if (packMatch && packMatch[1]) {
+                try {
+                    const pack = JSON.parse(packMatch[1]);
+                    return decodeLxp2ExamPackForCms(pack);
+                } catch (err) {
+                    console.warn("Failed to parse/decode LXP2 pack via regex:", err);
+                }
+            }
+            if (raw.includes('"alg"') && raw.includes('"luminova-lxp-v2"')) {
+                try {
+                    const cleanRaw = raw.replace(/^(?:window\.)?__LUMINOVA_EXAM_PACK__\s*=\s*/, '').replace(/;\s*$/, '');
+                    const pack = JSON.parse(cleanRaw);
+                    return decodeLxp2ExamPackForCms(pack);
+                } catch (err) {
+                    console.warn("Failed to parse direct LXP2 JSON:", err);
+                }
+            }
+        }
+
         const candidates = [raw];
-        const assignmentRegex = new RegExp(`(?:window\\.)?${schema.variable}\\s*=\\s*([\\s\\S]*?)\\s*;?\\s*$`);
+        const assignmentRegex = new RegExp(`(?:window\\.)?_?_?${schema.variable}_?_?\\s*=\\s*([\\s\\S]*?)\\s*;?\\s*$`);
         const assignmentMatch = raw.match(assignmentRegex);
         if (assignmentMatch && assignmentMatch[1]) candidates.unshift(assignmentMatch[1]);
 
@@ -49,11 +377,11 @@
                     : parsed && typeof parsed === 'object' && !Array.isArray(parsed);
                 if (isValid) return parsed;
             } catch (error) {
-                // Keep trying narrower candidates before surfacing a parse error.
+                // جرّب صيغاً أضيق قبل إظهار خطأ القراءة.
             }
         }
 
-        throw new Error(`Could not parse ${schema.variable} as ${schema.kind} JSON.`);
+        throw new Error(`تعذر قراءة ${schema.variable} كبيانات JSON من نوع ${schema.kind}.`);
     };
 
     const assignLuminovaPayload = (target, payload) => {
@@ -62,7 +390,7 @@
         window[schema.variable] = payload;
     };
 
-    const getExamIdentity = (exam) => normalizeText(exam?.examCode || exam?.examId || exam?.code || exam?.id);
+    const getExamIdentity = (exam) => normalizeText(exam?.quizId || exam?.examId || exam?.examCode || exam?.code || exam?.id);
 
     const getQuestionSignature = (question) => {
         if (!question || typeof question !== 'object') return '';
@@ -96,9 +424,19 @@
     const getQuestionKeys = (question) => {
         const keys = [];
         if (question?.id) keys.push(`id:${normalizeText(question.id)}`);
+        if (question?.questionId) keys.push(`questionId:${normalizeText(question.questionId)}`);
         const signature = getQuestionSignature(question);
         if (signature.replace(/[:|]/g, '').trim()) keys.push(`sig:${signature}`);
         return keys;
+    };
+
+    const createStableId = (prefix = 'id', usedIds = new Set()) => {
+        let id;
+        do {
+            id = `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        } while (usedIds.has(id));
+        usedIds.add(id);
+        return id;
     };
 
     const mergeExamMetadata = (existing, incoming) => {
@@ -210,6 +548,210 @@
         .map(email => email.trim())
         .filter(Boolean);
 
+    const isSheetNameValid = (value) => {
+        const name = String(value || '').trim();
+        return !!name && name.length <= 100 && !/[\[\]\*\/\\\?:]/.test(name);
+    };
+
+    const sanitizeSheetName = (value, fallback = 'Exam') => {
+        const safe = String(value || fallback)
+            .replace(/[\[\]\*\/\\\?:]/g, '_')
+            .replace(/\s+/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 90);
+        return safe || fallback;
+    };
+
+    const validateWebhookUrl = (value) => {
+        const urlText = String(value || '').trim();
+        if (!urlText) return { ok: false, message: 'رابط سكربت جوجل غير موجود. لا يمكن نشر الاختبار قبل ضبط رابط التسليم.' };
+        try {
+            const url = new URL(urlText);
+            const isGasHost = url.hostname === 'script.google.com';
+            const isExec = /\/exec\/?$/.test(url.pathname);
+            const isDev = /\/dev\/?$/.test(url.pathname);
+            if (!isGasHost || !isExec || isDev) {
+                return { ok: false, message: isDev ? 'رابط تطبيق الويب يشير إلى /dev. استخدم رابط النشر /exec.' : 'رابط تطبيق الويب غير صالح. يجب أن يكون رابط سكربت جوجل منتهيًا بـ /exec.' };
+            }
+            return { ok: true, message: 'تم ضبط رابط /exec صالح.' };
+        } catch (error) {
+            return { ok: false, message: 'رابط تطبيق الويب غير صالح.' };
+        }
+    };
+
+    const canonicalStringify = (value) => {
+        if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
+        if (value && typeof value === 'object') {
+            return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalStringify(value[key])}`).join(',')}}`;
+        }
+        return JSON.stringify(value);
+    };
+
+    const stableHash = (value) => {
+        const text = typeof value === 'string' ? value : canonicalStringify(value);
+        let hash = 0x811c9dc5;
+        for (let i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 0x01000193) >>> 0;
+        }
+        return `fnv1a_${hash.toString(16).padStart(8, '0')}`;
+    };
+
+    const normalizeExamQuestions = (questions = []) => {
+        const usedIds = new Set();
+        return (Array.isArray(questions) ? questions : []).map((question, index) => {
+            const nextQuestion = { ...(question || {}) };
+            let stableId = nextQuestion.id || nextQuestion.questionId;
+            if (!stableId || usedIds.has(String(stableId))) {
+                stableId = createQuestionId(usedIds);
+            } else {
+                usedIds.add(String(stableId));
+            }
+            nextQuestion.id = String(stableId);
+            nextQuestion.questionId = String(nextQuestion.questionId || stableId);
+            nextQuestion.originalIndex = index;
+            nextQuestion.type = nextQuestion.type || 'mcq';
+            nextQuestion.score = Number(nextQuestion.score || 1);
+            return nextQuestion;
+        });
+    };
+
+    const buildQuestionsMatrix = (questions = []) => normalizeExamQuestions(questions).map((question, index) => ({
+        index,
+        id: question.id,
+        questionId: question.questionId,
+        type: question.type || 'mcq',
+        score: Number(question.score || 1),
+        text: question.text || question.textAr || question.textEn || '',
+        options: Array.isArray(question.options) ? question.options : [],
+        correctAnswers: Array.isArray(question.correctAnswers) ? question.correctAnswers : [],
+        modelAnswer: question.modelAnswer || question.modelAnswerAr || '',
+        explanation: question.explanation || question.explanationAr || ''
+    }));
+
+    const getExamTitle = (exam) => exam?.titleAr || exam?.titleEn || exam?.title || exam?.examCode || exam?.id || '';
+
+    const makeDefaultSheetName = (exam) => {
+        const quizId = sanitizeSheetName(exam?.quizId || exam?.examId || exam?.examCode || exam?.code || exam?.id || Date.now().toString(36), 'quiz');
+        return sanitizeSheetName(`Exam_${quizId}`, 'Exam');
+    };
+
+    const buildSchemaHash = (exam) => {
+        const questions = normalizeExamQuestions(exam?.questions || []);
+        const payload = {
+            quizId: exam?.quizId || '',
+            sheetName: exam?.sheetName || '',
+            expectedQuestionCount: questions.length,
+            questions: questions.map(question => ({
+                questionId: question.questionId,
+                type: question.type || 'mcq',
+                score: Number(question.score || 1)
+            }))
+        };
+        return stableHash(payload);
+    };
+
+    const getDerivedSubmissionStatus = (exam) => {
+        if (exam?.examMode !== 'evaluation' || exam?.transactionalSubmissionEnabled !== true) return exam.submissionStatus || 'not_tested';
+        if (!exam?.webhookUrl || !exam?.sheetName) return 'not_configured';
+        const schemaHash = exam.schemaHash || buildSchemaHash(exam);
+        if (exam.preparedSchemaHash && exam.preparedSchemaHash !== schemaHash) return 'schema_changed_after_prepare';
+        if (exam.preparedSchemaHash && exam.preparedSchemaHash === schemaHash) {
+            return exam.submissionStatus === 'tested' ? 'ready_for_students' : (exam.submissionStatus || 'prepared');
+        }
+        return exam.submissionStatus || 'not_tested';
+    };
+
+    const normalizeExamForControl = (exam = {}, options = {}) => {
+        const identitySeed = exam.quizId || exam.examId || exam.examCode || exam.code || exam.id;
+        const quizId = identitySeed ? String(identitySeed) : createStableId('quiz');
+        const questions = normalizeExamQuestions(exam.questions || []);
+        const transactionalSubmissionEnabled = exam.transactionalSubmissionEnabled !== undefined
+            ? exam.transactionalSubmissionEnabled === true
+            : options.defaultTransactional === true;
+
+        const isEvaluation = exam.examMode === 'evaluation';
+        const duplicatePolicy = isEvaluation ? 'prevent_by_email' : (exam.duplicatePolicy || 'prevent_by_email');
+        const allowRetakes = isEvaluation ? false : (exam.allowRetakes !== undefined ? !!exam.allowRetakes : false);
+        const allowRetry = isEvaluation ? false : (exam.allowRetry !== undefined ? !!exam.allowRetry : allowRetakes);
+        const maxAttempts = isEvaluation ? 1 : (exam.maxAttempts !== undefined && exam.maxAttempts !== null ? Number(exam.maxAttempts) : 1);
+        const showResult = exam.showResult !== undefined ? !!exam.showResult : (exam.showResultsAfter !== undefined ? !!exam.showResultsAfter : true);
+        const resultDisplayMode = exam.resultDisplayMode || 'score_with_answers_and_explanations';
+        const showScore = exam.showScore !== undefined ? !!exam.showScore : true;
+        const showPercentage = exam.showPercentage !== undefined ? !!exam.showPercentage : true;
+        const showCorrectAnswers = exam.showCorrectAnswers !== undefined ? !!exam.showCorrectAnswers : true;
+        const showModelAnswers = exam.showModelAnswers !== undefined ? !!exam.showModelAnswers : true;
+        const showExplanations = exam.showExplanations !== undefined ? !!exam.showExplanations : true;
+        const allowReviewAfterSubmit = exam.allowReviewAfterSubmit !== undefined ? !!exam.allowReviewAfterSubmit : true;
+
+        const nextExam = {
+            ...exam,
+            id: exam.id || quizId,
+            quizId,
+            examCode: exam.examCode || quizId,
+            transactionalSubmissionEnabled,
+            webhookUrl: exam.webhookUrl || '',
+            spreadsheetId: exam.spreadsheetId || '',
+            sheetName: exam.sheetName && exam.sheetName !== 'Sheet1' ? sanitizeSheetName(exam.sheetName, 'Exam') : makeDefaultSheetName({ ...exam, quizId }),
+            questions,
+            expectedQuestionCount: questions.length,
+
+            duplicatePolicy,
+            allowRetakes,
+            allowRetry,
+            maxAttempts,
+            showResult,
+            resultDisplayMode,
+            showScore,
+            showPercentage,
+            showCorrectAnswers,
+            showModelAnswers,
+            showExplanations,
+            allowReviewAfterSubmit
+        };
+        nextExam.schemaHash = buildSchemaHash(nextExam);
+        nextExam.submissionStatus = getDerivedSubmissionStatus(nextExam);
+        return nextExam;
+    };
+
+    const getSubmissionStatusBadge = (status) => {
+        const map = {
+            not_configured: { label: 'غير مضبوط', cls: 'bg-red-500/10 border-red-500/30 text-red-500' },
+            not_tested: { label: 'لم يتم الاختبار', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-500' },
+            tested: { label: 'تم اختبار الاتصال', cls: 'bg-blue-500/10 border-blue-500/30 text-blue-500' },
+            prepared: { label: 'تم تجهيز الشيت', cls: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' },
+            schema_changed_after_prepare: { label: 'تم تعديل الأسئلة بعد التجهيز', cls: 'bg-red-500/10 border-red-500/30 text-red-500' },
+            ready_for_students: { label: 'جاهز للطلاب', cls: 'bg-green-500/10 border-green-500/30 text-green-500' }
+        };
+        return map[status] || map.not_tested;
+    };
+
+    const validateExamForExport = (exam) => {
+        const errors = [];
+        if (exam.examMode !== 'evaluation' || exam.transactionalSubmissionEnabled !== true) return errors;
+        const webhook = validateWebhookUrl(exam.webhookUrl);
+        if (!webhook.ok) errors.push(webhook.message);
+        if (!isSheetNameValid(exam.sheetName)) errors.push('اسم ورقة النتائج غير صالح.');
+        if (!exam.quizId) errors.push('هوية الاختبار غير موجودة.');
+        if (!Array.isArray(exam.questions) || exam.questions.length === 0) errors.push('لا يمكن نشر اختبار بدون أسئلة.');
+        (exam.questions || []).forEach((question, index) => {
+            if (!question.id || !question.questionId) errors.push(`السؤال رقم ${index + 1} لا يحتوي على هوية ثابتة.`);
+            if (question.originalIndex === undefined || question.originalIndex === null) errors.push(`السؤال رقم ${index + 1} لا يحتوي على originalIndex.`);
+        });
+        if (exam.expectedQuestionCount !== (exam.questions || []).length) errors.push('عدد الأسئلة المتوقع لا يطابق عدد الأسئلة الفعلي.');
+        if (!exam.schemaHash) errors.push('schemaHash غير موجود.');
+        if (!exam.preparedSchemaHash) errors.push('لم يتم تجهيز شيت الاختبار بعد. اضغط "تجهيز شيت الاختبار" قبل النشر.');
+        if (exam.preparedSchemaHash && exam.preparedSchemaHash !== exam.schemaHash) errors.push('تم تعديل الأسئلة بعد تجهيز الشيت. يجب إعادة تجهيز الشيت قبل النشر.');
+        if (exam.submissionStatus === 'schema_changed_after_prepare') errors.push('تم اكتشاف اختلاف بين أسئلة الاختبار والشيت المجهز. يرجى إعادة تجهيز الشيت قبل النشر.');
+        return [...new Set(errors)];
+    };
+
+    const stripExamForStudentExport = (exam) => {
+        const { spreadsheetId, ...publicExam } = exam;
+        return publicExam;
+    };
+
     Luminova.FOUNDER = {
         id: 's_founder_hardcoded', nameAr: 'محمود عبد الرحمن عبدالله', nameEn: 'Mahmoud Abdelrahman', isFounder: true, isVIP: true, isVerified: true,
         image: '../img/profile.png', majorAr: 'تكنولوجيا التعليم', majorEn: 'Educational Technology',
@@ -224,7 +766,7 @@
 
     Luminova.i18n = {
         ar: {
-            appName: "Luminova Edu", home: "الرئيسية", community: "مجتمع الطلاب", academic: "المكتبة الأكاديمية",
+            appName: "لومينوفا التعليمية", home: "الرئيسية", community: "مجتمع الطلاب", academic: "المكتبة الأكاديمية",
             adminToggle: "الإدارة", founder: "المؤسس", vip: "مميز", verified: "موثوق", doctor: "دكتور",
             readMore: "عرض المزيد", readLess: "عرض أقل", searchPlaceholder: "ابحث هنا...", emptyState: "لا يوجد بيانات لعرضها.",
             years: "الفرق الدراسية", semesters: "الفصول الدراسية", subjects: "المواد الدراسية",
@@ -232,28 +774,30 @@
             quitWarning: "هل أنت متأكد من الخروج؟ سيتم فقدان التقدم.", score: "الدرجة",
             modelAnswer: "الإجابة النموذجية:", explanation: "التعليل:",
             deleteProtected: "لا يمكن الحذف.. الرجاء مسح المحتويات الداخلية أولاً",
-            save: "حفظ", delete: "حذف", cancel: "إلغاء", exportData: "سحب الكود (Export initialData)",
+            save: "حفظ", delete: "حذف", cancel: "إلغاء", exportData: "تصدير كود البيانات",
             logout: "خروج الإدارة", passwordPrompt: "أدخل كلمة سر الإدارة:", wrongPassword: "كلمة السر خاطئة!",
             major: "التخصص", correct: "إجابة صحيحة", wrong: "إجابة خاطئة", results: "النتائج",
             topContributors: "شرف المساهمين 🏆", news: "أحدث الأخبار 📢", feed: "الخلاصة 🔥",
             certificates: "الشهادات والتوثيق",
+            settings: "إعدادات التسليم",
             merger: "دمج الملفات الذكي 🤖"
         },
         en: {
-            appName: "Luminova Edu", home: "Home", community: "Community", academic: "Academic Library",
-            adminToggle: "Admin", founder: "Founder", vip: "VIP", verified: "Verified", doctor: "Doctor",
-            readMore: "Read More", readLess: "Read Less", searchPlaceholder: "Search...", emptyState: "No data available.",
-            years: "Academic Years", semesters: "Semesters", subjects: "Subjects",
-            summaries: "Summaries", quizzes: "Quizzes", startQuiz: "Start Quiz", questions: "Questions",
-            quitWarning: "Are you sure you want to quit? Progress will be lost.", score: "Score",
-            modelAnswer: "Model Answer:", explanation: "Explanation:",
-            deleteProtected: "Cannot delete. Please remove inner contents first.",
-            save: "Save", delete: "Delete", cancel: "Cancel", exportData: "Export initialData Code",
-            logout: "Admin Logout", passwordPrompt: "Enter admin password:", wrongPassword: "Wrong password!",
-            major: "Major", correct: "Correct", wrong: "Wrong", results: "Results",
-            topContributors: "Top Contributors 🏆", news: "Latest News 📢", feed: "The Feed 🔥",
-            certificates: "Certificates Archive",
-            merger: "Smart Data Merger 🤖"
+            appName: "لومينوفا التعليمية", home: "الرئيسية", community: "مجتمع الطلاب", academic: "المكتبة الأكاديمية",
+            adminToggle: "الإدارة", founder: "المؤسس", vip: "مميز", verified: "موثوق", doctor: "دكتور",
+            readMore: "عرض المزيد", readLess: "عرض أقل", searchPlaceholder: "ابحث هنا...", emptyState: "لا توجد بيانات لعرضها.",
+            years: "الفرق الدراسية", semesters: "الفصول الدراسية", subjects: "المواد الدراسية",
+            summaries: "التلخيصات", quizzes: "الاختبارات", startQuiz: "بدء الاختبار", questions: "الأسئلة",
+            quitWarning: "هل أنت متأكد من الخروج؟ سيتم فقدان التقدم.", score: "الدرجة",
+            modelAnswer: "الإجابة النموذجية:", explanation: "التعليل:",
+            deleteProtected: "لا يمكن الحذف. الرجاء حذف المحتويات الداخلية أولاً.",
+            save: "حفظ", delete: "حذف", cancel: "إلغاء", exportData: "تصدير كود البيانات",
+            logout: "خروج الإدارة", passwordPrompt: "أدخل كلمة سر الإدارة:", wrongPassword: "كلمة السر خاطئة!",
+            major: "التخصص", correct: "إجابة صحيحة", wrong: "إجابة خاطئة", results: "النتائج",
+            topContributors: "شرف المساهمين 🏆", news: "أحدث الأخبار 📢", feed: "الخلاصة 🔥",
+            certificates: "أرشيف الشهادات",
+            settings: "إعدادات التسليم",
+            merger: "دمج الملفات الذكي 🤖"
         }
     };
 
@@ -322,10 +866,10 @@
             const mimeMatch = isBase64 ? urlStr.match(/data:(.*?);/) : null;
             const mimeType = mimeMatch ? mimeMatch[1] : '';
 
-            // Universal parsing logic: Treat non-http, non-data strings as relative paths
+            // منطق قراءة عام: أي نص ليس رابط ويب أو بيانات مضمنة يعامل كمسار نسبي
             const isRelative = !urlStr.startsWith('http') && !urlStr.startsWith('data:') && !urlStr.startsWith('blob:') && !urlStr.startsWith('file://');
 
-            // Regex Rules
+            // قواعد التعرف على الروابط
             const ytRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
             const ytMatch = urlStr.match(ytRegex);
 
@@ -334,33 +878,33 @@
                 embedContent = html`
                         <div className="w-full">
                             <iframe loading="lazy" src=${`https://www.youtube.com/embed/${videoId}` || 'about:blank'} title="YouTube" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" className="w-full h-[400px] border-none rounded-xl shadow-lg" allowFullScreen></iframe>
-                            <a href=${urlStr} target="_blank" rel="noopener noreferrer" className="mt-3 block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all">${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'Open Link Externally ↗'}</a>
+                            <a href=${urlStr} target="_blank" rel="noopener noreferrer" className="mt-3 block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all">${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'فتح الرابط بالخارج ↗'}</a>
                         </div>`;
             } else if (urlStr.includes('drive.google.com')) {
                 const driveId = urlStr.match(/[-\w]{25,}/);
                 embedContent = html`
                         <div className="w-full">
                             <iframe loading="lazy" src=${(driveId ? `https://drive.google.com/file/d/${driveId}/preview` : 'about:blank')} width="100%" height="500" allow="autoplay" className="rounded-xl shadow-lg border-2 border-brand-DEFAULT/20 bg-white" allowFullScreen></iframe>
-                            <a href=${urlStr} target="_blank" rel="noopener noreferrer" className="mt-3 block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all">${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'Open Link Externally ↗'}</a>
+                            <a href=${urlStr} target="_blank" rel="noopener noreferrer" className="mt-3 block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all">${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'فتح الرابط بالخارج ↗'}</a>
                         </div>`;
             } else if (urlStr.includes('docs.google.com/forms')) {
                 embedContent = html`
                         <div className="w-full">
                             <iframe loading="lazy" src=${urlStr || 'about:blank'} width="100%" height="600" frameBorder="0" marginHeight="0" marginWidth="0" className="rounded-xl shadow-lg bg-white" allowFullScreen></iframe>
-                            <a href=${urlStr} target="_blank" rel="noopener noreferrer" className="mt-3 block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all">${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'Open Link Externally ↗'}</a>
+                            <a href=${urlStr} target="_blank" rel="noopener noreferrer" className="mt-3 block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all">${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'فتح الرابط بالخارج ↗'}</a>
                         </div>`;
             } else if (urlStr.match(/\.(jpeg|jpg|gif|png|webp|svg)(\?.*)?$/i) || (isBase64 && mimeType.startsWith('image/'))) {
                 embedContent = html`<div style=${{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', overflow: 'hidden' }} className="w-full mb-4">
-                        <img loading="lazy" src=${urlStr} alt="Smart Media" className="shadow-lg mx-auto rounded-xl cursor-pointer" onClick=${() => window.dispatchEvent(new CustomEvent('openFullscreen', { detail: urlStr }))} style=${{ maxHeight: '400px', maxWidth: '100%', width: 'auto', objectFit: 'contain' }} />
+                        <img loading="lazy" src=${urlStr} alt="وسائط تعليمية" className="shadow-lg mx-auto rounded-xl cursor-pointer" onClick=${() => window.dispatchEvent(new CustomEvent('openFullscreen', { detail: urlStr }))} style=${{ maxHeight: '400px', maxWidth: '100%', width: 'auto', objectFit: 'contain' }} />
                     </div>`;
             } else if (urlStr.match(/\.(mp3|wav|ogg)(\?.*)?$/i) || (isBase64 && mimeType.startsWith('audio/'))) {
                 embedContent = html`<audio controls className="w-full shadow-lg rounded-xl mb-4 bg-gray-100 dark:bg-gray-800 p-2"><source src=${urlStr} type=${isBase64 ? mimeType : `audio/${urlStr.split('.').pop().split('?')[0]}`} />متصفحك لا يدعم تشغيل الصوت.</audio>`;
             } else if (urlStr.match(/\.(mp4|webm)(\?.*)?$/i) || (isBase64 && mimeType.startsWith('video/'))) {
                 embedContent = html`<video controls className="w-full max-h-[500px] rounded-xl bg-black shadow-lg mb-4"><source src=${urlStr} type=${isBase64 ? mimeType : `video/${urlStr.split('.').pop().split('?')[0]}`} />متصفحك لا يدعم تشغيل الفيديو.</video>`;
             } else if (urlStr.match(/\.pdf(\?.*)?$/i) || (isBase64 && mimeType === 'application/pdf')) {
-                embedContent = html`<iframe src=${urlStr} width="100%" height="800px" style=${{ minHeight: '80vh' }} className="rounded-xl shadow-lg bg-white border-2 border-brand-DEFAULT/20" frameBorder="0" title="PDF Viewer"></iframe>`;
+                embedContent = html`<iframe src=${urlStr} width="100%" height="800px" style=${{ minHeight: '80vh' }} className="rounded-xl shadow-lg bg-white border-2 border-brand-DEFAULT/20" frameBorder="0" title="عارض ملف PDF"></iframe>`;
             } else {
-                // Handle HTML and generic unknown links
+                // التعامل مع صفحات HTML والروابط العامة غير المعروفة
                 const isLocalHtml = urlStr.toLowerCase().endsWith('.html') || (isBase64 && mimeType === 'text/html');
                 const isLocalFallback = urlStr.startsWith('file://') || isRelative;
 
@@ -378,14 +922,14 @@
                                     className="flex-1 py-4 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-black transition-all flex items-center justify-center gap-2 border-none"
                                 >
                                     <span className="text-xl leading-none">⛶</span>
-                                    <span>${lang === 'ar' ? 'تكبير' : 'Enlarge'}</span>
+                                    <span>${lang === 'ar' ? 'تكبير' : 'تكبير'}</span>
                                 </button>
                                 <a
                                     href=${urlStr}
                                     target="_blank"
                                     className="flex-1 py-4 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-black transition-all flex items-center justify-center gap-2 no-underline"
                                 >
-                                    <span>${lang === 'ar' ? 'فتح بصفحة جديدة' : 'New Tab'}</span>
+                                    <span>${lang === 'ar' ? 'فتح بصفحة جديدة' : 'فتح في تبويب جديد'}</span>
                                     <span className="text-xl leading-none">↗</span>
                                 </a>
                             </div>
@@ -396,15 +940,15 @@
                         <div className="flex flex-col bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-lg border border-gray-100 dark:border-gray-700 mb-4 relative z-10 w-full">
                             <div className="w-full flex flex-col items-center justify-center gap-2 py-8 px-4 bg-gray-50 dark:bg-gray-800">
                                 <span style=${{ fontSize: '40px', lineHeight: 1 }}>📁</span>
-                                <p className="text-sm font-bold text-gray-500 dark:text-gray-400 text-center">${lang === 'ar' ? 'مرفق محلي' : 'Local Attachment'}</p>
+                                <p className="text-sm font-bold text-gray-500 dark:text-gray-400 text-center">${lang === 'ar' ? 'مرفق محلي' : 'مرفق محلي'}</p>
                                 <a href=${urlStr} target="_blank" className="mt-4 px-6 py-2 bg-brand-DEFAULT text-white rounded-full font-bold shadow-md hover:bg-brand-hover transition-colors">
-                                    ${lang === 'ar' ? 'تنزيل / عرض الملف' : 'Download / View File'}
+                                    ${lang === 'ar' ? 'تنزيل / عرض الملف' : 'تنزيل / عرض الملف'}
                                 </a>
                             </div>
                         </div>
                         `;
                 } else {
-                    // General fallback for unknown web URLs
+                    // بديل عام للروابط غير المعروفة
                     embedContent = html`
                         <div className="flex flex-col bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-lg border border-gray-100 dark:border-gray-700 mb-4 relative z-10 w-full">
                             <iframe
@@ -414,7 +958,7 @@
                             ></iframe>
                             <div className="w-full p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700">
                                 <a href=${urlStr} target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all">
-                                    ${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'Open Link Externally ↗'}
+                                    ${lang === 'ar' ? 'فتح الرابط بالخارج ↗' : 'فتح الرابط بالخارج ↗'}
                                 </a>
                             </div>
                         </div>
@@ -431,7 +975,7 @@
                 const positionClass = isArabicLang ? "absolute -top-5 right-4 sm:right-6" : "absolute -top-5 left-4 sm:left-6";
                 const dirAttr = isArabicLang ? "rtl" : "ltr";
 
-                // Luxurious Nano Banana Pill Badge Overlay
+                // شارة عنوان المرفق
                 titleBadge = html`
                     <div className=${`${positionClass} z-20 pointer-events-none`} dir=${dirAttr}>
                         <div className="backdrop-blur-md bg-gray-900/80 dark:bg-black/80 border border-white/10 dark:border-white/5 shadow-xl shadow-black/20 rounded-xl px-4 py-2 flex items-center gap-3">
@@ -452,7 +996,7 @@
     Luminova.Components.SummaryCard = ({ item: rawItem, data, lang, onClose }) => {
         if (!rawItem) return null;
         const item = typeof rawItem === 'object' ? rawItem : ((data.summaries || []).find(s => s.id === rawItem) || (data.news || []).find(s => s.id === rawItem));
-        if (!item) return html`<div className="text-center py-20 font-bold opacity-50">Content not found.</div>`;
+        if (!item) return html`<div className="text-center py-20 font-bold opacity-50">المحتوى غير موجود.</div>`;
         const author = Luminova.getStudent(item.studentId, data.students);
         const currentUrls = item.mediaUrls || (item.mediaUrl ? [item.mediaUrl] : []);
 
@@ -460,7 +1004,7 @@
         <div className="animate-fade-in relative max-w-4xl mx-auto pb-20 mt-4 xl:mt-8 px-2 sm:px-4">
             <button onClick=${onClose} className="mb-6 flex items-center gap-2 text-brand-DEFAULT hover:text-brand-hover font-bold transition-colors bg-white dark:bg-gray-800 px-4 py-2 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                 <span className="text-xl">${lang === 'ar' ? '←' : '→'}</span>
-                <span>${lang === 'ar' ? 'الرجوع للقائمة' : 'Back to Feed'}</span>
+                <span>${lang === 'ar' ? 'الرجوع للقائمة' : 'الرجوع للقائمة'}</span>
             </button>
             
             ${author && author.id !== 'unknown' && html`
@@ -469,9 +1013,9 @@
                     <div>
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                             <h3 className="font-black text-xl sm:text-2xl text-brand-DEFAULT drop-shadow-sm">${lang === 'ar' ? (author.nameAr || author.name) : (author.nameEn || author.name)}</h3>
-                            ${author.isVIP && html`<span className="text-xs text-brand-DEFAULT bg-brand-DEFAULT/10 px-3 py-1 rounded-full font-bold shadow-sm">VIP ✨</span>`}
+                            ${author.isVIP && html`<span className="text-xs text-brand-DEFAULT bg-brand-DEFAULT/10 px-3 py-1 rounded-full font-bold shadow-sm">مميز ✨</span>`}
                             ${author.isFounder && html`<span className="text-xs bg-brand-gold text-black shadow-lg px-3 py-1 rounded-full font-black tracking-widest">${Luminova.i18n[lang].founder}</span>`}
-                            ${!author.isFounder && author.role === 'doctor' && html`<span className="text-xs bg-teal-500 text-white shadow-lg px-3 py-1 rounded-full font-black tracking-widest">🎓 ${lang === 'ar' ? 'دكتور' : 'Doctor'}</span>`}
+                            ${!author.isFounder && author.role === 'doctor' && html`<span className="text-xs bg-teal-500 text-white shadow-lg px-3 py-1 rounded-full font-black tracking-widest">🎓 ${lang === 'ar' ? 'دكتور' : 'دكتور'}</span>`}
                         </div>
                         <p className="text-sm font-bold opacity-60 text-gray-500 dark:text-gray-400 font-mono">${Luminova.formatDate(item.timestamp, lang)}</p>
                     </div>
@@ -489,7 +1033,7 @@
                 <div className="space-y-12 bg-gray-50/50 dark:bg-gray-800/10 p-2 sm:p-8 rounded-3xl">
                     <div className="flex items-center gap-3 mb-8 px-4 sm:px-0">
                         <span className="text-3xl">📎</span>
-                        <h3 className="text-2xl font-black text-indigo-500 drop-shadow-sm">${lang === 'ar' ? 'المرفقات والشروحات' : 'Attachments & Media'}</h3>
+                        <h3 className="text-2xl font-black text-indigo-500 drop-shadow-sm">${lang === 'ar' ? 'المرفقات والشروحات' : 'المرفقات والشروحات'}</h3>
                     </div>
                     ${currentUrls.map((mUrl, i) => html`
                         <div key=${i} className="relative z-10 w-full hover:scale-[1.01] transition-transform duration-300">
@@ -505,7 +1049,7 @@
 
     Luminova.Components.Avatar = ({ name = "", nameEn = "", image = "", isVIP = false, isVerified = false, isFounder = false, size = "w-12 h-12" }) => {
         const getInitials = () => {
-            // Enforce pulling from English name strictly if missing image 
+            // استخدام الاسم اللاتيني كأحرف بديلة عند عدم وجود صورة 
             const targetName = (nameEn && nameEn.trim() !== '') ? nameEn : "ST";
             const words = targetName.trim().split(' ').filter(w => w);
             return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : targetName.substring(0, 2).toUpperCase();
@@ -543,7 +1087,7 @@
         return html`
         <div className="mb-4 w-full">
             <label className="block text-sm font-black mb-2 opacity-80">${label}</label>
-            <input type="url" value=${val || ''} onChange=${(e) => onChange(e.target.value)} className="w-full p-4 rounded-xl bg-white/50 dark:bg-gray-800 border-2 border-dashed dark:border-gray-700 focus:border-brand-DEFAULT outline-none shadow-sm" placeholder="URL Link" />
+            <input type="url" value=${val || ''} onChange=${(e) => onChange(e.target.value)} className="w-full p-4 rounded-xl bg-white/50 dark:bg-gray-800 border-2 border-dashed dark:border-gray-700 focus:border-brand-DEFAULT outline-none shadow-sm" placeholder="رابط URL" />
         </div>
     `;
     };
@@ -579,16 +1123,16 @@
 
         let inputContent = null;
         if (inputType === 'url') {
-            inputContent = html`<${Luminova.Components.Input} label="رابط مباشر (URL YouTube, Drive, Image...)" val=${urlStr} onChange=${v => emitChange(v, titleAr, titleEn)} />`;
+            inputContent = html`<${Luminova.Components.Input} label="رابط مباشر لفيديو أو ملف أو صورة" val=${urlStr} onChange=${v => emitChange(v, titleAr, titleEn)} />`;
         } else if (inputType === 'base64') {
             inputContent = html`
-                <div className="mb-2 text-xs font-bold text-gray-400">سيتم حفظ الملف وتضمينه كـ Base64 ليعمل بدون إنترنت.</div>
-                <${Luminova.Components.FileInput} label="رفع ملف (Upload File Base64)" accept="*/*" onFileLoaded=${v => emitChange(v, titleAr, titleEn)} />
+                <div className="mb-2 text-xs font-bold text-gray-500 dark:text-gray-400">سيتم حفظ الملف وتضمينه داخل البيانات ليعمل بدون إنترنت.</div>
+                <${Luminova.Components.FileInput} label="رفع ملف مضمن" accept="*/*" onFileLoaded=${v => emitChange(v, titleAr, titleEn)} />
             `;
         } else {
             inputContent = html`
-                <div className="mb-2 text-xs font-bold text-gray-400">مثال: file-html/lesson1/index.html أو files/document.pdf </div>
-                <${Luminova.Components.Input} label="مسار ملف محلي (Local Path)" placeholder="example/path/index.html" val=${urlStr} onChange=${v => emitChange(v, titleAr, titleEn)} />
+                <div className="mb-2 text-xs font-bold text-gray-500 dark:text-gray-400">مثال: file-html/lesson1/index.html أو files/document.pdf </div>
+                <${Luminova.Components.Input} label="مسار ملف محلي" placeholder="مثال: lessons/path/index.html" val=${urlStr} onChange=${v => emitChange(v, titleAr, titleEn)} />
             `;
         }
 
@@ -596,15 +1140,15 @@
         <div className="flex flex-col gap-2 p-4 bg-white/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700/50 rounded-xl w-full hover:border-brand-DEFAULT/30 transition-colors">
             <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
                 <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg shadow-inner">
-                    <button onClick=${() => setInputType('url')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'url' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>رابط (URL)</button>
-                    <button onClick=${() => setInputType('base64')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'base64' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>ملف (Base64)</button>
+                    <button onClick=${() => setInputType('url')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'url' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>رابط</button>
+                    <button onClick=${() => setInputType('base64')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'base64' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>ملف مضمن</button>
                     <button onClick=${() => setInputType('local')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'local' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>مسار محلي</button>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 shadow-inner">
-                        <button onClick=${onMoveUp} disabled=${isFirst} className="px-2 py-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-gray-700 dark:text-gray-300 shadow-sm" title="تحريك لأعلى (Move Up)">↑</button>
+                        <button onClick=${onMoveUp} disabled=${isFirst} className="px-2 py-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-gray-700 dark:text-gray-300 shadow-sm" title="تحريك لأعلى">↑</button>
                         <div className="w-[1px] h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
-                        <button onClick=${onMoveDown} disabled=${isLast} className="px-2 py-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-gray-700 dark:text-gray-300 shadow-sm" title="تحريك لأسفل (Move Down)">↓</button>
+                        <button onClick=${onMoveDown} disabled=${isLast} className="px-2 py-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-gray-700 dark:text-gray-300 shadow-sm" title="تحريك لأسفل">↓</button>
                     </div>
                     <button onClick=${onRemove} className="text-red-500 hover:text-white hover:bg-red-500 px-3 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition-all border border-red-500/20" title="حذف المرفق">✖</button>
                 </div>
@@ -613,10 +1157,10 @@
                 ${inputContent}
                 <div className="w-full pl-0 flex flex-col md:flex-row gap-4 border-t border-brand-DEFAULT/10 pt-4 mt-2">
                     <div className="flex-1 border-l-4 border-brand-DEFAULT/30 pl-2 sm:pl-4">
-                        <${Luminova.Components.Input} label="عنوان المرفق (عربي) - Optional" placeholder="مثال: فيديو شرح الدرس الأول..." val=${titleAr} onChange=${v => emitChange(urlStr, v, titleEn)} />
+                        <${Luminova.Components.Input} label="عنوان المرفق - اختياري" placeholder="مثال: فيديو شرح الدرس الأول..." val=${titleAr} onChange=${v => emitChange(urlStr, v, titleEn)} />
                     </div>
                     <div className="flex-1 border-l-4 border-brand-hover/30 pl-2 sm:pl-4">
-                        <${Luminova.Components.Input} label="Custom Title (English) - Optional" placeholder="e.g. Lesson One Video..." val=${titleEn} onChange=${v => emitChange(urlStr, titleAr, v)} />
+                        <${Luminova.Components.Input} label="عنوان بديل - اختياري" placeholder="مثال: فيديو شرح الدرس الأول..." val=${titleEn} onChange=${v => emitChange(urlStr, titleAr, v)} />
                     </div>
                 </div>
             </div>
@@ -624,7 +1168,7 @@
         `;
     };
 
-    Luminova.Components.UniversalMediaInput = ({ attachments = [], onChange, label = "إرفاق وسائط (Media Attachments)" }) => {
+    Luminova.Components.UniversalMediaInput = ({ attachments = [], onChange, label = "إرفاق وسائط" }) => {
         // Enforce array safely and normalize items structurally
         const rawItems = Array.isArray(attachments) ? attachments : (attachments ? [attachments] : []);
 
@@ -675,7 +1219,7 @@
             </div>
             <div className="flex justify-center pt-4">
                 <button onClick=${() => onChange([...sortedItems, { url: '', titleAr: '', titleEn: '', order: sortedItems.length }])} className="px-8 py-3 bg-brand-DEFAULT/10 hover:bg-brand-DEFAULT text-brand-DEFAULT hover:text-white font-black rounded-xl transition-colors shadow-sm flex items-center gap-2 border border-brand-DEFAULT/30 border-dashed hover:border-solid">
-                    <span className="text-xl">➕</span> إضافة مرفق جديد (Add Media Attachment)
+                    <span className="text-xl">➕</span> إضافة مرفق جديد
                 </button>
             </div>
         </div>
@@ -705,7 +1249,7 @@
         return html`
         <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in">
             <div className="w-16 h-16 border-4 border-brand-DEFAULT border-t-transparent rounded-full animate-spin shadow-lg"></div>
-            <p className="mt-6 text-xl font-bold opacity-80 text-brand-DEFAULT animate-pulse tracking-widest">${lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
+            <p className="mt-6 text-xl font-bold opacity-80 text-brand-DEFAULT animate-pulse tracking-widest">${lang === 'ar' ? 'جاري التحميل...' : 'جاري التحميل...'}</p>
         </div>
         `;
     };
@@ -717,7 +1261,7 @@
         return html`
         <div className=${`relative ${className}`}>
             <button onClick=${() => setIsOpen(!isOpen)} onBlur=${() => setTimeout(() => setIsOpen(false), 200)}
-                className="w-full appearance-none bg-slate-800/50 hover:bg-slate-800/80 border border-slate-700 text-white rounded-2xl px-4 py-3.5 outline-none transition-all cursor-pointer shadow-sm font-bold flex justify-between items-center z-10 relative"
+                className="w-full appearance-none bg-white dark:bg-slate-800/50 hover:bg-gray-50 dark:hover:bg-slate-800/80 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white rounded-2xl px-4 py-3.5 outline-none transition-all cursor-pointer shadow-sm font-bold flex justify-between items-center z-10 relative"
             >
                 <span className=${selectedOption ? 'opacity-100' : 'opacity-70'}>
                     ${selectedOption ? selectedOption.label : placeholder}
@@ -725,12 +1269,12 @@
                 <span className=${`transition-transform duration-300 transform opacity-50 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
             </button>
             ${isOpen && html`
-                <div className="absolute top-full left-0 right-0 mt-2 z-[999] animate-fade-in backdrop-blur-xl bg-slate-900/90 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-[250px] overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-2 z-[999] animate-fade-in backdrop-blur-xl bg-white/90 dark:bg-slate-900/90 border border-gray-200 dark:border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-[250px] overflow-y-auto">
                     <ul className="py-2 flex flex-col m-0 p-0">
                         ${options.map(opt => html`
                             <li key=${opt.value} 
                                 onClick=${() => { onChange(opt.value); setIsOpen(false); }}
-                                className=${`px-5 py-3 cursor-pointer transition-colors font-bold ${String(value) === String(opt.value) ? 'bg-brand-DEFAULT/20 text-brand-gold' : 'text-slate-300 hover:bg-brand-DEFAULT/20 hover:text-white'}`}
+                                className=${`px-5 py-3 cursor-pointer transition-colors font-bold ${String(value) === String(opt.value) ? 'bg-brand-DEFAULT/20 text-brand-gold' : 'text-gray-700 dark:text-slate-300 hover:bg-brand-DEFAULT/10 dark:hover:bg-brand-DEFAULT/20 hover:text-brand-hover dark:hover:text-white'}`}
                             >
                                 ${opt.label}
                             </li>
@@ -765,7 +1309,7 @@
         if (!showOverlay || ignoreOrientation) return null;
 
         return html`
-        <div className="fixed inset-0 z-[11000] flex flex-col items-center justify-center p-6 backdrop-blur-xl bg-slate-900/95 text-white animate-fade-in" dir=${lang === 'ar' ? 'rtl' : 'ltr'}>
+        <div className="fixed inset-0 z-[11000] flex flex-col items-center justify-center p-6 backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 text-gray-900 dark:text-white animate-fade-in" dir=${lang === 'ar' ? 'rtl' : 'ltr'}>
             <div className="flex flex-col items-center text-center max-w-lg w-full">
                 <!-- Rotating Tablet Icon CSS Animation -->
                 <style>
@@ -793,10 +1337,10 @@
                 </div>
                 
                 <h2 className="text-3xl lg:text-4xl font-black mb-6 leading-tight bg-gradient-to-r from-brand-gold to-yellow-200 bg-clip-text text-transparent drop-shadow-md">
-                    ${lang === 'ar' ? 'للحصول على أفضل تجربة تصفح، يرجى تدوير التابلت أو الآيباد إلى الوضع العرضي' : 'For the best browsing experience, please rotate your tablet/iPad to landscape mode'}
+                    ${lang === 'ar' ? 'للحصول على أفضل تجربة تصفح، يرجى تدوير التابلت أو الآيباد إلى الوضع العرضي' : 'للحصول على أفضل تجربة تصفح، يرجى تدوير الجهاز إلى الوضع العرضي'}
                 </h2>
                 <button onClick=${() => setIgnoreOrientation(true)} className="mt-8 px-8 py-4 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 backdrop-blur-sm font-bold transition-all shadow-xl hover:shadow-2xl active:scale-95 text-xl">
-                    ${lang === 'ar' ? 'إكمال على أي حال' : 'Continue anyway'}
+                    ${lang === 'ar' ? 'إكمال على أي حال' : 'إكمال على أي حال'}
                 </button>
             </div>
         </div>
@@ -959,7 +1503,7 @@
         };
 
         const toggleLang = () => {
-            const newLang = lang === 'ar' ? 'en' : 'ar';
+            const newLang = 'ar';
             setLang(newLang);
             setData(prev => ({ ...prev, settings: { ...prev.settings, language: newLang } }));
         };
@@ -980,10 +1524,25 @@
                     setData(prev => ({ ...prev, quizzes: window.LUMINOVA_EXAMS }));
                     return;
                 }
+
+                // Stale Global Protection
+                window.LUMINOVA_EXAMS = undefined;
+                window.__LUMINOVA_EXAMS__ = undefined;
+                window.__LUMINOVA_EXAM_PACK__ = undefined;
+
                 const script = document.createElement('script');
                 script.src = 'exam.js?v=2';
                 script.setAttribute('data-lmv-page', 'exam');
                 script.onload = () => {
+                    if (window.__LUMINOVA_EXAM_PACK__) {
+                        try {
+                            window.LUMINOVA_EXAMS = decodeLxp2ExamPackForCms(window.__LUMINOVA_EXAM_PACK__);
+                        } catch (e) {
+                            console.error("Failed to decode LXP2 prefetch pack:", e);
+                        }
+                    } else if (window.__LUMINOVA_EXAMS__) {
+                        window.LUMINOVA_EXAMS = window.__LUMINOVA_EXAMS__;
+                    }
                     setData(prev => ({ ...prev, quizzes: window.LUMINOVA_EXAMS || [] }));
                 };
                 script.onerror = () => console.warn('Luminova: exam.js failed to load.');
@@ -1047,7 +1606,7 @@
                 textTransform: 'uppercase',
                 marginTop: '12px',
                 fontWeight: 600,
-            }}>Educational Platform</p>
+            }}>منصة تعليمية</p>
                 </div>
                 <style>{'@keyframes lmv-splash-in { from { opacity: 0; transform: scale(0.88) translateY(16px); } to { opacity: 1; transform: scale(1) translateY(0); } }'}</style>
             </div>
@@ -1065,8 +1624,8 @@
                     <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-[0_32px_80px_rgba(0,0,0,0.35)] p-8 w-full max-w-sm border border-white/30 dark:border-slate-700 animate-fade-in">
                         <div className="flex flex-col items-center mb-6">
                             <div style=${{ width: '56px', height: '56px', background: 'linear-gradient(135deg,#06b6d4,#f59e0b)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '900', fontSize: '28px', boxShadow: '0 4px 20px rgba(6,182,212,0.4)', marginBottom: '16px' }}>L</div>
-                            <h2 className="text-2xl font-black text-gray-900 dark:text-white">${lang === 'ar' ? 'دخول الإدارة' : 'Admin Access'}</h2>
-                            <p className="text-sm opacity-50 font-bold mt-1">${lang === 'ar' ? 'أدخل كلمة السر للمتابعة' : 'Enter password to continue'}</p>
+                            <h2 className="text-2xl font-black text-gray-900 dark:text-white">${lang === 'ar' ? 'دخول الإدارة' : 'دخول الإدارة'}</h2>
+                            <p className="text-sm opacity-50 font-bold mt-1">${lang === 'ar' ? 'أدخل كلمة السر للمتابعة' : 'أدخل كلمة السر للمتابعة'}</p>
                         </div>
 
                         <div className="relative mb-2">
@@ -1077,14 +1636,14 @@
                                 autoFocus
                                 value=${adminPwd}
                                 onChange=${(e) => { setAdminPwd(e.target.value); setAdminPwdError(false); }}
-                                onKeyDown=${(e) => e.key === 'Enter' && handleAdminSubmit()}
-                                placeholder=${lang === 'ar' ? 'كلمة السر...' : 'Password...'}
+                                onKeyDown=${(e) => e.key === 'دخول' && handleAdminSubmit()}
+                                placeholder=${lang === 'ar' ? 'كلمة السر...' : 'كلمة السر...'}
                                 className=${`w-full px-12 py-4 rounded-2xl font-bold text-gray-800 dark:text-white bg-slate-100 dark:bg-slate-900 outline-none transition-all duration-300 text-base ${adminPwdError ? 'ring-2 ring-red-500 bg-red-50 dark:bg-red-900/20' : 'focus:ring-2 focus:ring-brand-DEFAULT'}`}
                             />
                         </div>
                         ${adminPwdError && html`
                             <p className="text-red-500 font-bold text-sm text-center mb-3 animate-fade-in">
-                                ${lang === 'ar' ? '❌ كلمة السر خاطئة، حاول مجدداً' : '❌ Wrong password, try again'}
+                                ${lang === 'ar' ? '❌ كلمة السر خاطئة، حاول مجدداً' : '❌ كلمة السر خاطئة، حاول مجدداً'}
                             </p>
                         `}
 
@@ -1093,12 +1652,12 @@
                                 id="admin-modal-cancel"
                                 onClick=${handleAdminCancel}
                                 className="flex-1 py-3.5 rounded-2xl font-black bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 transition-all"
-                            >${lang === 'ar' ? 'تراجع' : 'Cancel'}</button>
+                            >${lang === 'ar' ? 'تراجع' : 'تراجع'}</button>
                             <button
                                 id="admin-modal-submit"
                                 onClick=${handleAdminSubmit}
                                 className="flex-1 py-3.5 rounded-2xl font-black bg-gradient-to-r from-brand-DEFAULT to-brand-gold text-white shadow-lg hover:opacity-90 hover:shadow-brand-DEFAULT/40 transition-all"
-                            >${lang === 'ar' ? 'دخول' : 'Enter'}</button>
+                            >${lang === 'ar' ? 'دخول' : 'دخول'}</button>
                         </div>
                     </div>
                 </div>
@@ -1114,7 +1673,7 @@
                     <div style=${{ width: '40px', height: '40px', background: 'linear-gradient(135deg, #06b6d4, #f59e0b)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '900', fontSize: '22px', boxShadow: '0 4px 15px rgba(6,182,212,0.4)', flexShrink: 0 }} className="group-hover:scale-110 transition-transform">L</div>
                     <!-- Platform name: hidden on mobile (shown in center), visible on desktop -->
                     <span className="hidden sm:inline font-black text-transparent bg-clip-text bg-gradient-to-r from-brand-DEFAULT to-brand-gold" style=${{ fontSize: '1.2rem', whiteSpace: 'nowrap', fontWeight: '900' }}>
-                        ${lang === 'ar' ? 'لومينوفا التعليمية' : 'Luminova Edu'}
+                        لومينوفا التعليمية
                     </span>
                 </div>
 
@@ -1142,7 +1701,7 @@
                     <!-- Mobile: Platform name in center (visible only on mobile) -->
                     <div key="mb-nav" className="flex md:hidden flex-1 justify-center">
                         <span style=${{ fontWeight: '900', fontSize: '1.1rem', whiteSpace: 'nowrap', background: 'linear-gradient(90deg, #06b6d4, #f59e0b)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-                            ${lang === 'ar' ? 'لومينوفا التعليمية' : 'Luminova Edu'}
+                            لومينوفا التعليمية
                         </span>
                     </div>
                 ` : html`<div key="empty-nav" className="flex-1"></div>`}
@@ -1151,10 +1710,10 @@
                 <div style=${{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                     <button onClick=${toggleLang}
                         className="font-black text-sm border-2 border-brand-DEFAULT text-brand-DEFAULT px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl hover:bg-brand-DEFAULT hover:text-white transition-all shadow-sm flex-shrink-0">
-                        ${lang === 'ar' ? 'EN' : 'AR'}
+                        عربي
                     </button>
                     <button onClick=${toggleTheme}
-                        className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all text-lg sm:text-xl shadow-inner flex-shrink-0" title="Toggle Theme">
+                        className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all text-lg sm:text-xl shadow-inner flex-shrink-0" title="تبديل المظهر">
                         ${data.settings?.theme === 'dark' ? '☀️' : '🌙'}
                     </button>
                 </div>
@@ -1167,7 +1726,7 @@
 
             <!-- Mobile Bottom Navigation Bar (hidden on desktop via CSS) -->
             ${view !== 'cms' && view !== 'quiz' && html`
-                <nav key="bottom-nav-container" className="lmv-bottom-nav" aria-label=${lang === 'ar' ? 'التنقل الرئيسي' : 'Main navigation'}>
+                <nav key="bottom-nav-container" className="lmv-bottom-nav" aria-label="التنقل الرئيسي">
                     <button className=${`lmv-bottom-nav-btn ${view === 'home' ? 'active' : ''}`} onClick=${() => changeView('home')} title=${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}>
                         <${Luminova.Icons.Home} />
                         <span className="lmv-nav-label">${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}</span>
@@ -1195,6 +1754,14 @@
         const [subView, setSubView] = useState(''); // '' or 'questions'
         const [qItem, setQItem] = useState(null); // Extracted dynamically to fix rules of hooks crash
         const [cmsSearchQuery, setCmsSearchQuery] = useState('');
+        const [qSearchQuery, setQSearchQuery] = useState('');
+        const getDefaultCmsVisibleCount = useCallback((tab) => {
+            return ['subjects', 'summaries', 'quizzes'].includes(tab) ? 10 : 15;
+        }, []);
+        const [cmsVisibleCount, setCmsVisibleCount] = useState(() => getDefaultCmsVisibleCount(activeTab));
+        const [filterYear, setFilterYear] = useState('');
+        const [filterSem, setFilterSem] = useState('');
+        const [filterSub, setFilterSub] = useState('');
 
         // Merger State
         const [mergerTarget, setMergerTarget] = useState('data'); // data, exams, certs
@@ -1203,7 +1770,151 @@
         const [mergerStatus, setMergerStatus] = useState({ state: 'idle', msg: '' });
 
         const [examMergeStatus, setExamMergeStatus] = useState(null);
-        const [bulkSendStatus, setBulkSendStatus] = useState(null);
+        const [submissionActionStatus, setSubmissionActionStatus] = useState(null);
+        const [isTestingSubmission, setIsTestingSubmission] = useState(false);
+        const [isPreparingExam, setIsPreparingExam] = useState(false);
+        const [isTranslating, setIsTranslating] = useState(false);
+        const handleOpenReportsHub = useCallback(() => {
+            window.open('admin-reports.html', '_blank', 'noopener,noreferrer');
+        }, []);
+
+        useEffect(() => {
+            setCmsVisibleCount(getDefaultCmsVisibleCount(activeTab));
+            setFilterYear('');
+            setFilterSem('');
+            setFilterSub('');
+            setCmsSearchQuery('');
+            setQSearchQuery('');
+        }, [activeTab, getDefaultCmsVisibleCount]);
+
+        useEffect(() => {
+            setQSearchQuery('');
+        }, [subView, editingItem]);
+
+        const persistEditedQuiz = (exam) => {
+            const normalized = normalizeExamForControl(exam, { settings: data.settings || {} });
+            setEditingItem(normalized);
+            setData(prev => {
+                const exists = (prev.quizzes || []).some(item => item.id === normalized.id || getExamIdentity(item) === getExamIdentity(normalized));
+                if (!exists) return prev;
+                const newQuizzes = (prev.quizzes || []).map(item => (item.id === normalized.id || getExamIdentity(item) === getExamIdentity(normalized)) ? normalized : item);
+                window.LUMINOVA_EXAMS = newQuizzes;
+                return { ...prev, quizzes: newQuizzes };
+            });
+            return normalized;
+        };
+
+        const handleAutoTranslate = useCallback(() => {
+            setIsTranslating(true);
+            window.setTimeout(() => {
+                setIsTranslating(false);
+                alert(lang === 'ar' ? 'الترجمة التلقائية غير مفعلة حالياً.' : 'الترجمة التلقائية غير مفعلة حالياً.');
+            }, 150);
+        }, [lang]);
+
+        const postSubmissionAction = async (webhookUrl, payload) => {
+            const response = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+            const responseText = await response.text();
+            try {
+                return responseText ? JSON.parse(responseText) : {};
+            } catch (err) {
+                return { status: response.ok ? 'ok' : 'error', message: responseText };
+            }
+        };
+
+        const handleTestSubmissionConnection = async () => {
+            const exam = normalizeExamForControl(editingItem || {}, { settings: data.settings || {} });
+            const webhookStatus = validateWebhookUrl(exam.webhookUrl);
+            if (!webhookStatus.ok) {
+                setSubmissionActionStatus({ state: 'error', msg: 'فشل الاتصال بسكربت جوجل. تأكد من رابط تطبيق الويب وصلاحيات النشر.' });
+                return;
+            }
+            setIsTestingSubmission(true);
+            setSubmissionActionStatus({ state: 'loading', msg: 'جاري اختبار اتصال التسليم...' });
+            try {
+                const base = exam.spreadsheetId ? { spreadsheetId: exam.spreadsheetId } : {};
+                const timeResult = await postSubmissionAction(exam.webhookUrl, { action: 'get_time', ...base });
+                if (timeResult.status !== 'ok') throw new Error(timeResult.message || 'فشل اختبار وقت الخادم');
+
+                const verifyResult = await postSubmissionAction(exam.webhookUrl, {
+                    action: 'verify_submission',
+                    submissionId: 'cms_test_missing',
+                    verificationHash: 'cms_test_missing',
+                    payloadHash: 'cms_test_missing',
+                    responseCount: 0,
+                    expectedQuestionCount: 0,
+                    ...base
+                });
+                if (!['not_found', 'mismatch'].includes(verifyResult.status)) {
+                    throw new Error(verifyResult.message || 'أعاد اختبار التحقق حالة غير متوقعة');
+                }
+
+                try {
+                    await postSubmissionAction(exam.webhookUrl, { action: 'health_check', ...base });
+                } catch (healthErr) {
+                    console.warn('Optional health_check failed:', healthErr);
+                }
+
+                const updated = persistEditedQuiz({ ...exam, submissionStatus: 'tested' });
+                setSubmissionActionStatus({ state: 'success', msg: 'تم الاتصال بسكربت جوجل بنجاح. نظام التسليم جاهز.' });
+                setEditingItem(updated);
+            } catch (err) {
+                setSubmissionActionStatus({ state: 'error', msg: 'فشل الاتصال بسكربت جوجل. تأكد من رابط تطبيق الويب وصلاحيات النشر.' });
+            } finally {
+                setIsTestingSubmission(false);
+            }
+        };
+
+        const handlePrepareExamSheet = async () => {
+            const exam = normalizeExamForControl(editingItem || {}, { settings: data.settings || {} });
+            const webhookStatus = validateWebhookUrl(exam.webhookUrl);
+            if (!webhookStatus.ok || !exam.sheetName || !exam.quizId) {
+                setSubmissionActionStatus({ state: 'error', msg: 'فشل تجهيز شيت الاختبار. راجع رابط السكربت والصلاحيات.' });
+                return;
+            }
+            setIsPreparingExam(true);
+            setSubmissionActionStatus({ state: 'loading', msg: 'جاري تجهيز شيت الاختبار...' });
+            try {
+                const payload = {
+                    action: 'prepare_exam',
+                    schemaVersion: 2,
+                    quizId: exam.quizId,
+                    examTitle: getExamTitle(exam),
+                    sheetName: exam.sheetName,
+                    schemaHash: exam.schemaHash,
+                    expectedQuestionCount: exam.expectedQuestionCount,
+                    maxScore: exam.maxScore,
+                    duplicatePolicy: exam.duplicatePolicy || 'prevent_by_email',
+                    allowRetakes: !!exam.allowRetakes,
+                    maxAttempts: exam.maxAttempts !== undefined && exam.maxAttempts !== null ? Number(exam.maxAttempts) : 1,
+                    questions: buildPrepareExamQuestions(exam.questions)
+                };
+                if (exam.spreadsheetId) payload.spreadsheetId = exam.spreadsheetId;
+                const result = await postSubmissionAction(exam.webhookUrl, payload);
+                if (result.status === 'schema_mismatch') {
+                    persistEditedQuiz({ ...exam, submissionStatus: 'schema_changed_after_prepare' });
+                    setSubmissionActionStatus({ state: 'error', msg: 'تم اكتشاف اختلاف بين أسئلة الاختبار والشيت المجهز. يرجى إعادة تجهيز الشيت قبل النشر.' });
+                    return;
+                }
+                if (result.status !== 'prepared') throw new Error(result.message || 'فشل تجهيز الاختبار');
+                const updated = persistEditedQuiz({
+                    ...exam,
+                    preparedAt: new Date().toISOString(),
+                    preparedSchemaHash: result.schemaHash || exam.schemaHash,
+                    submissionStatus: 'ready_for_students'
+                });
+                setEditingItem(updated);
+                setSubmissionActionStatus({ state: 'success', msg: 'تم تجهيز شيت الاختبار بنجاح. الاختبار جاهز لاستقبال تسليمات الطلاب.' });
+            } catch (err) {
+                setSubmissionActionStatus({ state: 'error', msg: 'فشل تجهيز شيت الاختبار. راجع رابط السكربت والصلاحيات.' });
+            } finally {
+                setIsPreparingExam(false);
+            }
+        };
 
         const handleMultiExamImport = (e) => {
             const files = Array.from(e.target.files);
@@ -1226,7 +1937,7 @@
             Promise.all(readPromises).then(results => {
                 const allExams = results.flat();
                 if (!allExams.length) {
-                    setExamMergeStatus('No valid exams found in the selected files.');
+                    setExamMergeStatus('لم يتم العثور على اختبارات صالحة في الملفات المحددة.');
                     setTimeout(() => setExamMergeStatus(null), 8000);
                     return;
                 }
@@ -1246,7 +1957,7 @@
                 let skippedDuplicateQuestions = 0;
 
                 if (Object.keys(groups).length === 0) {
-                    setExamMergeStatus('No importable exams were found. Each exam needs an examCode, examId, code, or id.');
+                    setExamMergeStatus('لم يتم العثور على اختبارات قابلة للاستيراد. يجب أن يحتوي كل اختبار على هوية ثابتة.');
                     setTimeout(() => setExamMergeStatus(null), 8000);
                     return;
                 }
@@ -1299,7 +2010,7 @@
                         return { ...prev, quizzes: newQuizzes };
                     });
 
-                    const statusMsg = `Processed: ${newExamsCount} new, ${mergedExamsCount} merged, ${addedQuestionsCount} questions added, ${skippedDuplicateQuestions} duplicates skipped. Total questions: ${totalFinalQuestions}.`;
+                    const statusMsg = `تمت المعالجة: ${newExamsCount} اختبار جديد، ${mergedExamsCount} اختبار مدمج، ${addedQuestionsCount} سؤال مضاف، ${skippedDuplicateQuestions} سؤال مكرر تم تجاهله. إجمالي الأسئلة: ${totalFinalQuestions}.`;
                     
                     setExamMergeStatus(statusMsg);
                     setTimeout(() => setExamMergeStatus(null), 8000);
@@ -1308,182 +2019,7 @@
             e.target.value = '';
         };
 
-        const [isSendingBulk, setIsSendingBulk] = useState(false);
-
-        const handleBulkSendReports = async () => {
-            if (!editingItem || !editingItem.webhookUrl) {
-                setBulkSendStatus({ state: 'error', msg: 'Webhook URL is required in Advanced Settings.' });
-                setTimeout(() => setBulkSendStatus(null), 9000);
-                return;
-            }
-            if (!confirm(lang === 'ar' ? 'هل أنت متأكد من إرسال التقارير الشاملة لجميع الطلاب؟\nسيتم إرسال بريد إلكتروني لكل طالب قام بتسليم الاختبار.' : 'Are you sure you want to send reports to all students?')) return;
-
-            setIsSendingBulk(true);
-            setBulkSendStatus({ state: 'loading', msg: 'Sending bulk report request...' });
-            try {
-                const payload = {
-                    action: 'bulk_send_reports',
-                    sheetName: (editingItem.sheetName || 'Sheet1').trim() || 'Sheet1',
-                    examDetails: {
-                        title: editingItem.titleAr || editingItem.titleEn || editingItem.title || editingItem.id || ''
-                    },
-                    settings: {
-                        adminEmails: parseEmailList(editingItem.adminEmails)
-                    }
-                };
-                const response = await fetch(editingItem.webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify(payload)
-                });
-
-                const responseText = await response.text();
-                let result = {};
-                if (responseText) {
-                    try {
-                        result = JSON.parse(responseText);
-                    } catch (parseError) {
-                        if (!response.ok) throw parseError;
-                        result = { success: true, message: responseText };
-                    }
-                }
-                if (result.status === 'success' || result.success) {
-                    setBulkSendStatus({ state: 'success', msg: 'Bulk report emails were triggered successfully.' });
-                } else {
-                    throw new Error(result.message || 'Unknown GAS response.');
-                }
-            } catch (error) {
-                const corsLike = error instanceof TypeError;
-                setBulkSendStatus({
-                    state: corsLike ? 'success' : 'error',
-                    msg: corsLike
-                        ? 'Request sent. Check the Google Apps Script execution log for delivery results.'
-                        : 'Bulk send failed: ' + error.message
-                });
-            } finally {
-                setIsSendingBulk(false);
-                setTimeout(() => setBulkSendStatus(null), 9000);
-            }
-        };
-
-        const [isTranslating, setIsTranslating] = useState(false);
-
-        const translateText = async (arabicText) => {
-            if (!arabicText || !arabicText.trim()) return '';
-            try {
-                const response = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(arabicText)}&langpair=ar|en`);
-                const resData = await response.json();
-                const result = resData.responseData?.translatedText || '';
-                // Task 3: Arabic Leakage Filter
-                // If the "translated" result still contains Arabic characters, the API failed silently.
-                // Reject it and return '' to avoid duplicating Arabic text into English fields.
-                const containsArabic = /[\u0600-\u06FF]/.test(result);
-                if (containsArabic) {
-                    console.warn('Luminova: Translation API returned Arabic text — rejecting result.');
-                    return '';
-                }
-                return result;
-            } catch (error) {
-                console.error('Translation failed:', error);
-                return '';
-            }
-        };
-
-        const handleAutoTranslate = async () => {
-            if (!editingItem) return;
-            setIsTranslating(true);
-            try {
-                let updates = { ...editingItem };
-
-                if (activeTab === 'news' || activeTab === 'summaries') {
-                    if (updates.titleAr && !updates.titleEn) updates.titleEn = await translateText(updates.titleAr);
-                    if (updates.contentAr && !updates.contentEn) updates.contentEn = await translateText(updates.contentAr);
-
-                    if (updates.mediaUrls && Array.isArray(updates.mediaUrls)) {
-                        updates.mediaUrls = await Promise.all(updates.mediaUrls.map(async (media) => {
-                            if (typeof media === 'object' && media.titleAr && !media.titleEn) {
-                                return { ...media, titleEn: await translateText(media.titleAr) };
-                            }
-                            return media;
-                        }));
-                    }
-                } else if (activeTab === 'quizzes') {
-                    const titleToTranslate = updates.titleAr || updates.title;
-                    if (titleToTranslate && !updates.titleEn) updates.titleEn = await translateText(titleToTranslate);
-                } else if (activeTab === 'certificates') {
-                    if (updates.title) updates.titleEn = await translateText(updates.title);
-                    if (updates.description) updates.descriptionEn = await translateText(updates.description);
-                    if (updates.senderName) updates.senderNameEn = await translateText(updates.senderName);
-                    if (updates.studentName) updates.studentNameEn = await translateText(updates.studentName);
-                    if (updates.senderRole) updates.senderRoleEn = await translateText(updates.senderRole);
-                } else if (['years', 'semesters', 'subjects', 'students'].includes(activeTab)) {
-                    if (updates.nameAr && !updates.nameEn) updates.nameEn = await translateText(updates.nameAr);
-                    if (activeTab === 'students') {
-                        if (updates.bioAr && !updates.bioEn) updates.bioEn = await translateText(updates.bioAr);
-                        if (updates.majorAr && !updates.majorEn) updates.majorEn = await translateText(updates.majorAr);
-                    }
-                }
-                setEditingItem(updates);
-            } catch (error) {
-                alert(lang === 'ar' ? '❌ فشلت الترجمة، تحقق من الاتصال' : '❌ Translation failed, check connection');
-            } finally {
-                setIsTranslating(false);
-            }
-        };
-
-
-        const [cmsVisibleCount, setCmsVisibleCount] = useState(15);
-        const [filterYear, setFilterYear] = useState('');
-        const [filterSem, setFilterSem] = useState('');
-        const [filterSub, setFilterSub] = useState('');
-
-        useEffect(() => {
-            setCmsVisibleCount(['subjects', 'summaries', 'quizzes'].includes(activeTab) ? 10 : 15);
-            setFilterYear('');
-            setFilterSem('');
-            setFilterSub('');
-            setCmsSearchQuery('');
-
-            // Lazy-load certificates.js when the certificates tab is activated
-            if (activeTab === 'certificates' && !data.certificates) {
-                if (window.loadCertificatesData) {
-                    window.loadCertificatesData().then(certs => {
-                        setData(prev => ({ ...prev, certificates: certs }));
-                    });
-                } else {
-                    const script = document.createElement('script');
-                    script.src = 'js/pages/certificate-engine.js?v=' + Date.now();
-                    script.onload = () => {
-                        if (window.loadCertificatesData) {
-                            window.loadCertificatesData().then(certs => {
-                                setData(prev => ({ ...prev, certificates: certs }));
-                            });
-                        }
-                    };
-                    document.body.appendChild(script);
-                }
-            }
-
-            // Lazy-load exam.js when the quizzes tab is activated
-            if (activeTab === 'quizzes' && (!data.quizzes || data.quizzes.length === 0)) {
-                if (window.LUMINOVA_EXAMS && window.LUMINOVA_EXAMS.length > 0) {
-                    setData(prev => ({ ...prev, quizzes: window.LUMINOVA_EXAMS }));
-                } else {
-                    const existing = document.querySelector('script[data-lmv-page="exam"]');
-                    if (!existing) {
-                        const script = document.createElement('script');
-                        script.src = 'exam.js?v=2';
-                        script.setAttribute('data-lmv-page', 'exam');
-                        script.onload = () => {
-                            setData(prev => ({ ...prev, quizzes: window.LUMINOVA_EXAMS || [] }));
-                        };
-                        document.body.appendChild(script);
-                    }
-                }
-            }
-        }, [activeTab]);
-
-        const studentsWithFounder = [Luminova.FOUNDER, ...(data.students || []).filter(s => !s.isFounder)];
+                const studentsWithFounder = [Luminova.FOUNDER, ...(data.students || []).filter(s => !s.isFounder)];
 
         // ==========================================
         // 3-PILLAR EXPORT ENGINE
@@ -1492,6 +2028,8 @@
         // Export 1 — data.js: core platform data ONLY (no quizzes, no certificates)
         const handleExportData = () => {
             const { certificates, quizzes, ...coreData } = data;
+            coreData.settings = { ...(coreData.settings || {}) };
+            delete coreData.settings[['submission', 'Profiles'].join('')];
             const str = `window.LUMINOVA_DATA = ${JSON.stringify(coreData, null, 2)};`;
             const blob = new Blob([str], { type: 'text/javascript' });
             const url = URL.createObjectURL(blob);
@@ -1521,38 +2059,265 @@
         // Export 3 — exam.js: quiz/exam array ONLY
         const handleExportExams = () => {
             let exams = data.quizzes || [];
+
             if (window.CMS_USER_ROLE === 'editor') {
                 exams = exams.filter(item => window.CMS_EDITOR_ADDED_IDS && window.CMS_EDITOR_ADDED_IDS.includes(item.id));
             }
-            const str = `window.LUMINOVA_EXAMS = ${JSON.stringify(exams, null, 2)};`;
-            const blob = new Blob([str], { type: 'text/javascript' });
+
+            const legacyWarnings = exams
+                .filter(exam => exam && exam.transactionalSubmissionEnabled === undefined)
+                .map(exam => `- ${getExamTitle(exam) || getExamIdentity(exam) || 'اختبار بدون عنوان'}: اختبار قديم غير مفعل على نظام التسليم التعاقدي. سيتم تصديره كاختبار Legacy ولن يتم اعتباره جاهزًا للتسليم التعاقدي.`);
+            
+            const normalizedExams = exams.map(exam => normalizeExamForControl(exam, { settings: data.settings || {} }));
+            const validationErrors = [];
+            normalizedExams.forEach(exam => {
+                const errors = validateExamForExport(exam);
+                if (errors.length) {
+                    validationErrors.push(`- ${getExamTitle(exam) || exam.quizId}:`);
+                    errors.forEach(error => validationErrors.push(`  • ${error}`));
+                }
+            });
+            if (validationErrors.length) {
+                alert(['تم منع التصدير لحماية بيانات الطلاب من التسليم الناقص.', '', ...validationErrors].join('\n'));
+                return;
+            }
+            if (legacyWarnings.length && !confirm(['تنبيه قبل تصدير exam.js:', 'بعض الاختبارات القديمة غير مفعلة على نظام التسليم التعاقدي ولن يتم منع تصديرها تلقائيًا.', '', ...legacyWarnings, '', 'هل تريد متابعة التصدير؟'].join('\n'))) {
+                return;
+            }
+
+            // --- LXP2 Positional Pack Helpers ---
+            const asText = (value) => {
+              if (value === null || value === undefined) return "";
+              if (typeof value === "string") return value;
+              if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+              if (typeof value === "object") {
+                return String(
+                  value.text ??
+                  value.textAr ??
+                  value.textEn ??
+                  value.label ??
+                  value.title ??
+                  value.name ??
+                  value.value ??
+                  value.id ??
+                  ""
+                );
+              }
+              return "";
+            };
+
+            const asId = (value, fallback = "") => {
+              if (value === null || value === undefined) return String(fallback);
+              if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+                return String(value);
+              }
+              if (typeof value === "object") {
+                return String(
+                  value.id ??
+                  value.value ??
+                  value.key ??
+                  value.code ??
+                  value.text ??
+                  value.label ??
+                  fallback
+                );
+              }
+              return String(fallback);
+            };
+
+            const asNumber = (value, fallback = 0) => {
+              const n = Number(value);
+              return Number.isFinite(n) ? n : fallback;
+            };
+
+            const asTextArray = (value) => {
+              if (!Array.isArray(value)) return [];
+              return value.map(item => asText(item)).filter(Boolean);
+            };
+
+            const asIdArray = (value) => {
+              if (!Array.isArray(value)) return [];
+              return value.map((item, index) => asId(item, index)).filter(Boolean);
+            };
+
+            const packOption = (opt, index) => [
+              asId(opt?.id ?? opt?.value ?? opt, index),
+              asText(opt)
+            ];
+
+            const packQuestion = (q, index) => [
+              asId(q.questionId ?? q.id ?? q.uuid, `q_${index + 1}`),
+              asNumber(q.originalIndex ?? q.original_index, index),
+              asText(q.type || "mcq"),
+              asText(q.questionText ?? q.text ?? q.title ?? q.prompt),
+              Array.isArray(q.options) ? q.options.map(packOption) : [],
+              asNumber(q.maxPoints ?? q.points ?? q.score, 1),
+              asText(q.modelAnswer ?? q.correctAnswerText ?? q.answer),
+              asText(q.explanation ?? q.reason ?? q.feedback),
+              asTextArray(q.correctAnswers),
+              asIdArray(q.correctOptionIds),
+              asTextArray(q.acceptedAnswers)
+            ];
+
+             const packExam = (exam) => {
+              const questions = Array.isArray(exam.questions) ? exam.questions : [];
+              const packedQuestions = questions.map(packQuestion);
+
+              const maxScore = asNumber(
+                exam.maxScore,
+                packedQuestions.reduce((sum, q) => sum + asNumber(q[5], 1), 0)
+              );
+
+              const settings = {
+                duplicatePolicy: exam.duplicatePolicy || "prevent_by_email",
+                allowRetakes: !!exam.allowRetakes,
+                maxAttempts: exam.maxAttempts !== undefined && exam.maxAttempts !== null ? Number(exam.maxAttempts) : 1,
+                showResult: exam.showResult !== undefined ? !!exam.showResult : true,
+                resultDisplayMode: exam.resultDisplayMode || "score_with_answers_and_explanations",
+                showScore: exam.showScore !== undefined ? !!exam.showScore : true,
+                showPercentage: exam.showPercentage !== undefined ? !!exam.showPercentage : true,
+                showCorrectAnswers: exam.showCorrectAnswers !== undefined ? !!exam.showCorrectAnswers : true,
+                showModelAnswers: exam.showModelAnswers !== undefined ? !!exam.showModelAnswers : true,
+                showExplanations: exam.showExplanations !== undefined ? !!exam.showExplanations : true,
+                allowReviewAfterSubmit: exam.allowReviewAfterSubmit !== undefined ? !!exam.allowReviewAfterSubmit : true,
+                startTime: exam.startTime || "",
+                endTime: exam.endTime || "",
+                antiCheat: exam.antiCheat || {},
+                latePolicy: exam.latePolicy || "hard_stop"
+              };
+
+              return [
+                asId(exam.quizId ?? exam.id ?? exam.code),
+                asText(exam.title ?? exam.titleAr ?? exam.name),
+                asText(exam.titleAr ?? exam.title ?? exam.name),
+                asText(exam.titleEn ?? exam.title),
+                asText(exam.examMode ?? exam.mode ?? "practice"),
+                asText(exam.webhookUrl),
+                asText(exam.resultSpreadsheetId ?? exam.spreadsheetId),
+                asText(exam.sheetName),
+                asText(exam.schemaHash),
+                asText(exam.preparedSchemaHash ?? exam.schemaHash),
+                asNumber(exam.expectedQuestionCount, packedQuestions.length),
+                maxScore,
+                packedQuestions,
+                asId(exam.subjectId ?? exam.subject_id ?? exam.courseId),
+                asId(exam.categoryId ?? exam.category),
+                asId(exam.levelId ?? exam.level),
+                asNumber(exam.duration ?? exam.timeLimit ?? exam.time),
+                asNumber(exam.passingScore ?? exam.passScore ?? exam.passing),
+                asText(exam.publishStatus ?? exam.status ?? "published"),
+                settings
+              ];
+            };
+
+            const bytesToBase64 = (bytes) => {
+              const chunkSize = 0x8000;
+              let binary = "";
+              for (let i = 0; i < bytes.length; i += chunkSize) {
+                const chunk = bytes.subarray(i, i + chunkSize);
+                let chunkString = "";
+                for (let j = 0; j < chunk.length; j++) {
+                  chunkString += String.fromCharCode(chunk[j]);
+                }
+                binary += chunkString;
+              }
+              return btoa(binary);
+            };
+
+            const base64ToBase64Url = (value) => {
+              return value
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=+$/g, "");
+            };
+
+            // --- LXP2 Encrypted Export ---
+            const packedPayload = [
+              "LXP2",
+              normalizedExams.map(packExam)
+            ];
+
+            let json;
+            try {
+              json = JSON.stringify(packedPayload);
+            } catch (err) {
+              console.error("Exam pack payload is not JSON-safe", err);
+              alert("Exam pack payload is not JSON-safe. Check console.");
+              return;
+            }
+
+            const encoder = new TextEncoder();
+            const bytes = encoder.encode(json);
+
+            const saltBytes = new Uint8Array(32);
+            window.crypto.getRandomValues(saltBytes);
+
+            for (let i = 0; i < bytes.length; i++) {
+              bytes[i] ^= saltBytes[i % saltBytes.length];
+            }
+
+            const saltBase64 = base64ToBase64Url(bytesToBase64(saltBytes));
+            const payloadBase64 = base64ToBase64Url(bytesToBase64(bytes));
+
+            const chunkSize = 12000;
+            const chunks = [];
+
+            for (let i = 0; i < payloadBase64.length; i += chunkSize) {
+              chunks.push(payloadBase64.slice(i, i + chunkSize));
+            }
+
+            chunks.reverse();
+
+            const pack = {
+              v: 2,
+              alg: "luminova-lxp-v2",
+              createdAt: new Date().toISOString(),
+              salt: saltBase64,
+              checksum: String(payloadBase64.length),
+              meta: {
+                examsCount: exams.length,
+                chunksCount: chunks.length,
+                payloadLength: bytes.length,
+                build: "lxp2-positional-v1"
+              },
+              chunks
+            };
+
+            const outStr = `(function () {
+  "use strict";
+
+  window.__LUMINOVA_EXAM_PACK__ = ${JSON.stringify(pack, null, 2)};
+})();`;
+
+            const blob = new Blob([outStr], { type: "text/javascript;charset=utf-8" });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
+            const a = document.createElement("a");
             a.href = url;
-            a.download = 'exam.js';
+            a.download = "exam.js";
             a.click();
             URL.revokeObjectURL(url);
         };
 
         // --- MERGER LOGIC ---
         const handleFetchBase = async () => {
-            setMergerStatus({ state: 'loading', msg: 'Fetching live data from GitHub...' });
+            setMergerStatus({ state: 'loading', msg: 'جاري جلب البيانات الحالية من جت هب...' });
             const urls = { data: DATA_URL, exams: EXAM_URL, certs: CERTS_URL };
             try {
                 const res = await fetch(urls[mergerTarget] + '?t=' + new Date().getTime());
-                if (!res.ok) throw new Error('Fetch failed');
+                if (!res.ok) throw new Error('فشل جلب الملف');
                 const text = await res.text();
 
                 const extracted = parseLuminovaPayload(text, mergerTarget);
 
                 if (extracted) {
                     setMergerBase(extracted);
-                    setMergerStatus({ state: 'success', msg: `Successfully fetched ${mergerTarget} data.` });
+                    setMergerStatus({ state: 'success', msg: `تم جلب بيانات ${mergerTarget} بنجاح.` });
                 } else {
-                    throw new Error('Could not parse file structure.');
+                    throw new Error('تعذر قراءة بنية الملف.');
                 }
             } catch (e) {
-                setMergerStatus({ state: 'error', msg: 'Error: ' + e.message });
+                setMergerStatus({ state: 'error', msg: 'خطأ: ' + e.message });
             }
         };
 
@@ -1569,12 +2334,12 @@
 
                     if (extracted) {
                         setMergerLocal(extracted);
-                        setMergerStatus({ state: 'success', msg: `Parsed local ${file.name} successfully.` });
+                        setMergerStatus({ state: 'success', msg: `تمت قراءة الملف المحلي ${file.name} بنجاح.` });
                     } else {
-                        throw new Error('Structure mismatch. Ensure you uploaded the correct file type.');
+                        throw new Error('بنية الملف غير متطابقة. تأكد من رفع نوع الملف الصحيح.');
                     }
                 } catch (e) {
-                    setMergerStatus({ state: 'error', msg: 'Parse Error: ' + e.message });
+                    setMergerStatus({ state: 'error', msg: 'خطأ في القراءة: ' + e.message });
                 }
             };
             reader.readAsText(file);
@@ -1615,7 +2380,7 @@
                 updatedCount = result.stats.mergedExams;
                 setMergerStatus({
                     state: 'merged',
-                    msg: `Exam Merge Complete! New exams: ${result.stats.createdExams}, merged exams: ${result.stats.mergedExams}, questions added: ${result.stats.addedQuestions}, duplicates skipped: ${result.stats.skippedDuplicateQuestions}, ignored exams: ${result.stats.ignoredExams}. Total exams: ${finalData.length}.`
+                    msg: `اكتمل دمج الاختبارات. اختبارات جديدة: ${result.stats.createdExams}، اختبارات مدمجة: ${result.stats.mergedExams}، أسئلة مضافة: ${result.stats.addedQuestions}، مكررات متجاهلة: ${result.stats.skippedDuplicateQuestions}، اختبارات متجاهلة: ${result.stats.ignoredExams}. إجمالي الاختبارات: ${finalData.length}.`
                 });
                 setMergerBase(finalData);
                 setMergerLocal(null);
@@ -1628,7 +2393,7 @@
             setMergerLocal(null);
             setMergerStatus({
                 state: 'merged',
-                msg: `Merge Complete! Added: ${addedCount}, Updated: ${updatedCount}. Total: ${mergerTarget === 'data' ? 'N/A' : finalData.length}`
+                msg: `اكتمل الدمج. تمت الإضافة: ${addedCount}، تم التحديث: ${updatedCount}. الإجمالي: ${mergerTarget === 'data' ? 'غير متاح' : finalData.length}`
             });
         };
 
@@ -1640,7 +2405,27 @@
                 str = `window.LUMINOVA_DATA = ${JSON.stringify(mergerBase, null, 2)};`;
                 filename = 'data.js';
             } else if (mergerTarget === 'exams') {
-                str = `window.LUMINOVA_EXAMS = ${JSON.stringify(mergerBase, null, 2)};`;
+                const rawMergedExams = Array.isArray(mergerBase) ? mergerBase : [];
+                const legacyWarnings = rawMergedExams
+                    .filter(exam => exam && exam.transactionalSubmissionEnabled === undefined)
+                    .map(exam => `- ${getExamTitle(exam) || getExamIdentity(exam) || 'اختبار بدون عنوان'}: اختبار قديم غير مفعل على نظام التسليم التعاقدي.`);
+                const normalizedExams = rawMergedExams.map(exam => normalizeExamForControl(exam, { settings: data.settings || {} }));
+                const validationErrors = [];
+                normalizedExams.forEach(exam => {
+                    const errors = validateExamForExport(exam);
+                    if (errors.length) {
+                        validationErrors.push(`- ${getExamTitle(exam) || exam.quizId}:`);
+                        errors.forEach(error => validationErrors.push(`  • ${error}`));
+                    }
+                });
+                if (validationErrors.length) {
+                    alert(['تم منع التصدير لحماية بيانات الطلاب من التسليم الناقص.', '', ...validationErrors].join('\n'));
+                    return;
+                }
+                if (legacyWarnings.length && !confirm(['تنبيه قبل تحميل exam.js المدمج:', 'بعض الاختبارات القديمة سيتم تصديرها بوضع Legacy بدون تجهيز شيت تعاقدي.', '', ...legacyWarnings, '', 'هل تريد المتابعة؟'].join('\n'))) {
+                    return;
+                }
+                str = `window.LUMINOVA_EXAMS = ${JSON.stringify(normalizedExams.map(stripExamForStudentExport), null, 2)};`;
                 filename = 'exam.js';
             } else if (mergerTarget === 'certs') {
                 str = `window.LUMINOVA_CERTIFICATES = ${JSON.stringify(mergerBase, null, 2)};`;
@@ -1663,7 +2448,7 @@
             if (collection === 'subjects' && (data.summaries.some(s => s.subjectId === id) || data.quizzes.some(q => q.subjectId === id))) return alert(Luminova.i18n[lang].deleteProtected);
             if (collection === 'students' && (data.summaries.some(s => s.studentId === id) || data.quizzes.some(q => (q.questions || []).some(qn => qn.studentId === id)))) return alert(Luminova.i18n[lang].deleteProtected);
 
-            if (confirm(lang === 'ar' ? 'تأكيد الحذف؟' : 'Confirm deletion?')) {
+            if (confirm(lang === 'ar' ? 'تأكيد الحذف؟' : 'تأكيد الحذف؟')) {
                 setData(prev => ({ ...prev, [collection]: prev[collection].filter(item => item.id !== id) }));
             }
         };
@@ -1677,7 +2462,7 @@
                 if (!editingItem.chapterTag || !editingItem.chapterTag.trim()) {
                     return alert(lang === 'ar'
                         ? '❌ يجب تحديد الفصل الدراسي (Chapter Tag) — مطلوب لعرض الخلاصة الزمنية.'
-                        : '❌ Chapter Tag is required for the Timeline UI.');
+                        : '❌ يجب تحديد وسم الفصل لعرض الخلاصة الزمنية.');
                 }
 
                 // 2. If mediaType is "interactive", validate the lessonUrl strictly
@@ -1686,25 +2471,25 @@
                     if (!path) {
                         return alert(lang === 'ar'
                             ? '❌ يجب إدخال مسار ملف الدرس التفاعلي (Lesson File Path).'
-                            : '❌ Lesson File Path is required for interactive content.');
+                            : '❌ يجب إدخال مسار ملف الدرس التفاعلي.');
                     }
                     // Must end with .jsx or .js
                     if (!/\.(jsx|js)$/i.test(path)) {
                         return alert(lang === 'ar'
                             ? '❌ مسار الملف يجب أن ينتهي بـ .jsx أو .js'
-                            : '❌ File path must end with .jsx or .js');
+                            : '❌ مسار الملف يجب أن ينتهي بـ .jsx أو .js');
                     }
                     // No spaces allowed
                     if (/\s/.test(path)) {
                         return alert(lang === 'ar'
                             ? '❌ مسار الملف لا يجب أن يحتوي على مسافات فارغة.'
-                            : '❌ File path must not contain spaces.');
+                            : '❌ مسار الملف لا يجب أن يحتوي على مسافات فارغة.');
                     }
                     // No invalid URL characters (allow alphanumerics, hyphens, underscores, dots, slashes)
                     if (/[^a-zA-Z0-9\-_.\/]/.test(path)) {
                         return alert(lang === 'ar'
                             ? '❌ مسار الملف يحتوي على أحرف غير صالحة. يُسمح فقط بالأحرف والأرقام و - و _ و . و /'
-                            : '❌ File path contains invalid characters. Only alphanumerics, -, _, ., and / are allowed.');
+                            : '❌ مسار الملف يحتوي على أحرف غير صالحة.');
                     }
                     // Sanitize: commit the trimmed path back
                     editingItem.lessonUrl = path;
@@ -1712,7 +2497,9 @@
             }
 
             if (activeTab === 'quizzes') {
-                editingItem.examCode = editingItem.examCode || 'LUM-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 5).toUpperCase();
+                const normalizedQuiz = normalizeExamForControl(editingItem, { settings: data.settings || {} });
+                Object.keys(editingItem).forEach(key => delete editingItem[key]);
+                Object.assign(editingItem, normalizedQuiz);
             }
 
             editingItem.timestamp = editingItem.timestamp || new Date().toISOString();
@@ -1735,6 +2522,9 @@
                 if (activeTab === 'certificates') {
                     window.LUMINOVA_CERTIFICATES = newList;
                 }
+                if (activeTab === 'quizzes') {
+                    window.LUMINOVA_EXAMS = newList;
+                }
 
                 return { ...prev, [activeTab]: newList };
             });
@@ -1742,14 +2532,26 @@
         };
 
         const handleSubSave = (newQ) => {
-            const updatedQ = newQ.id ? editingItem.questions.map(q => q.id === newQ.id ? newQ : q) : [...(editingItem.questions || []), { ...newQ, id: `q_${Date.now()}` }];
-            const updatedQuiz = { ...editingItem, questions: updatedQ };
+            const normalizedCurrent = normalizeExamForControl(editingItem || {}, { settings: data.settings || {} });
+            const usedIds = new Set((normalizedCurrent.questions || []).map(q => q.id));
+            const nextQuestion = { ...newQ };
+            const existingQuestionId = nextQuestion.id || nextQuestion.questionId;
+            if (!nextQuestion.id && !nextQuestion.questionId) nextQuestion.id = createQuestionId(usedIds);
+            const updatedQ = existingQuestionId
+                ? normalizedCurrent.questions.map(q => q.id === nextQuestion.id ? { ...q, ...nextQuestion } : q)
+                : [...(normalizedCurrent.questions || []), nextQuestion];
+            const updatedQuiz = normalizeExamForControl({
+                ...normalizedCurrent,
+                questions: updatedQ,
+                submissionStatus: normalizedCurrent.preparedSchemaHash ? 'schema_changed_after_prepare' : normalizedCurrent.submissionStatus
+            }, { settings: data.settings || {} });
             setEditingItem(updatedQuiz);
             setSubView('questionsList');
 
             // Auto-save question changes to DB instantly
             setData(prev => {
                 const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
+                window.LUMINOVA_EXAMS = newList;
                 return { ...prev, [activeTab]: newList };
             });
         };
@@ -1760,7 +2562,10 @@
             if (activeTab === 'students') return { ...base, nameAr: 'عبد المنعم حجاج', nameEn: 'Abdelmonem Hagag', majorAr: '', majorEn: '', bioAr: '', bioEn: '', image: '', isVIP: false, isVerified: false, role: 'student', socialLinks: { facebook: '', instagram: '', linkedin: '' } };
             if (activeTab === 'years' || activeTab === 'semesters' || activeTab === 'subjects') return { ...base, nameAr: '', nameEn: '', yearId: '', semesterId: '' };
             if (activeTab === 'summaries') return { ...base, titleAr: '', titleEn: '', contentAr: '', contentEn: '', mediaUrl: '', subjectId: '', studentId: '', mediaType: 'video', chapterTag: '', lessonUrl: '' };
-            if (activeTab === 'quizzes') return { ...base, titleAr: '', titleEn: '', examCode: 'EXM_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5), isShuffled: false, feedbackMode: 'end', subjectId: '', publisherId: '', questions: [], examMode: 'practice', emailPolicy: 'none', adminEmails: '', sheetName: 'Sheet1', startTime: '', endTime: '', latePolicy: 'hard_stop', allowBackNavigation: true, webhookUrl: '', sendDetailedReport: false, entryGate: { name: true, department: true, email: true } };
+            if (activeTab === 'quizzes') {
+                const quizId = 'EXM_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+                return normalizeExamForControl({ ...base, id: quizId, quizId, titleAr: '', titleEn: '', examCode: quizId, isShuffled: false, feedbackMode: 'end', subjectId: '', publisherId: '', questions: [], examMode: 'practice', sheetName: `Exam_${quizId}`, startTime: '', endTime: '', latePolicy: 'hard_stop', allowBackNavigation: true, webhookUrl: '', transactionalSubmissionEnabled: false, duplicatePolicy: 'prevent_success_by_email_when_no_retakes', entryGate: { name: true, department: true, email: true } }, { settings: data.settings || {}, defaultTransactional: true });
+            }
             if (activeTab === 'certificates') return { ...base, studentName: '', studentNameEn: '', senderName: '', senderNameEn: '', senderRole: 'doctor', title: '', titleEn: '', description: '', descriptionEn: '', isFeatured: false, badges: [], date: base.timestamp, level: 'standard' };
             return base;
         };
@@ -1775,14 +2580,14 @@
                 return html`
                 <div key="edit-question-view" className="animate-fade-in pb-20 max-w-4xl mx-auto">
                     <div className="flex items-center justify-between mb-8 pb-4 border-b">
-                        <h2 className="text-3xl font-bold text-brand-DEFAULT">${tempQ.id ? 'تعديل سؤال (Edit)' : 'سؤال جديد (New)'}</h2>
+                        <h2 className="text-3xl font-bold text-brand-DEFAULT">${tempQ.id ? 'تعديل سؤال' : 'سؤال جديد'}</h2>
                         <${Luminova.Components.Button} onClick=${() => setSubView('questionsList')}>${Luminova.i18n[lang].cancel}</${Luminova.Components.Button}>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div className="col-span-2 space-y-4">
                              <div className="grid grid-cols-3 gap-4">
                                  <div className="col-span-1">
-                                     <label className="block text-sm font-black mb-2 opacity-80">نوع السؤال (Type)</label>
+                                     <label className="block text-sm font-black mb-2 opacity-80">نوع السؤال</label>
                                      <select value=${tempQ.type || 'mcq'} onChange=${e => setQItem({ ...tempQ, type: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 dark:border-gray-700 font-bold outline-none">
                                          <option value="mcq">اختيار من متعدد (إجابة واحدة)</option>
                                          <option value="multi_select">اختيار من متعدد (عدة إجابات)</option>
@@ -1790,11 +2595,11 @@
                                      </select>
                                  </div>
                                  <div className="col-span-1">
-                                     <label className="block text-sm font-black mb-2 opacity-80">درجة السؤال (Score)</label>
+                                     <label className="block text-sm font-black mb-2 opacity-80">درجة السؤال</label>
                                      <input type="number" value=${tempQ.score || 1} onChange=${e => setQItem({ ...tempQ, score: Number(e.target.value) })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 dark:border-gray-700 font-bold outline-none text-center" />
                                  </div>
                                  <div className="col-span-1">
-                                    <label className="block text-sm font-black mb-2 opacity-80">المساهم (Author)</label>
+                                    <label className="block text-sm font-black mb-2 opacity-80">المساهم</label>
                                     <select value=${tempQ.studentId || ''} onChange=${(e) => setQItem({ ...tempQ, studentId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 dark:border-gray-700 font-bold z-50 outline-none">
                                         <option value="">-- بدون مساهم --</option>
                                         ${studentsWithFounder.map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
@@ -1804,7 +2609,7 @@
                         </div>
                         
                         <div className="col-span-2 pt-6">
-                            <label className="block text-sm font-bold mb-2">السؤال (Question Text)</label>
+                            <label className="block text-sm font-bold mb-2">نص السؤال</label>
                             <textarea value=${tempQ.text || tempQ.textAr || ''} onChange=${e => setQItem({ ...tempQ, text: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 dark:border-gray-700 outline-none text-lg resize-y min-h-[120px]" placeholder="اكتب نص السؤال هنا..." />
                         </div>
                         <div className="col-span-2 w-full mt-2">
@@ -1812,9 +2617,9 @@
                         </div>
 
                         ${tempQ.type !== 'essay' ? html`
-                            <div className="col-span-2 space-y-3 pt-6">
+                            <div key="options-editor-section" className="col-span-2 space-y-3 pt-6">
                                 <label className="block text-sm font-bold mb-2 flex justify-between items-center">
-                                    <span>خيارات الإجابة (Options)</span>
+                                    <span>خيارات الإجابة</span>
                                     <button onClick=${() => setQItem({ ...tempQ, options: [...(tempQ.options || []), ''] })} className="px-3 py-1 bg-brand-DEFAULT text-white text-xs rounded-full font-bold shadow-md hover:scale-105">+ إضافة خيار</button>
                                 </label>
                                 ${(tempQ.options || ['']).map((opt, idx) => html`
@@ -1842,29 +2647,32 @@
                             </div>
                         ` : html`
                             <div className="col-span-2 pt-6">
-                                <label className="block text-sm font-bold mb-2">الإجابة النموذجية (Model Answer)</label>
+                                <label className="block text-sm font-bold mb-2">الإجابة النموذجية</label>
                                 <textarea value=${tempQ.modelAnswer || tempQ.modelAnswerAr || ''} onChange=${e => setQItem({ ...tempQ, modelAnswer: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 dark:border-gray-700 outline-none min-h-[100px]" placeholder="اكتب الإجابة النموذجية للسؤال المقالي..." />
                             </div>
                         `}
 
                         <div className="col-span-2 pt-6">
-                            <label className="block text-sm font-bold mb-2">Explanation / التعليل</label>
+                            <label className="block text-sm font-bold mb-2">التعليل</label>
                             <textarea value=${tempQ.explanation || tempQ.explanationAr || ''} onChange=${e => setQItem({ ...tempQ, explanation: e.target.value })} className="w-full p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/30 outline-none min-h-[100px] text-brand-gold" placeholder="اكتب شرحاً أو تعليلاً لسبب الإجابة الصحيحة..." />
                         </div>
 
                         <div className="col-span-2 mt-8 flex gap-4 border-t pt-4">
-                            <${Luminova.Components.Button} onClick=${() => handleSubSave(tempQ)} className="w-full text-xl py-3 shadow-[0_5px_30px_-10px_rgba(6,182,212,0.8)]">${Luminova.i18n[lang].save} Question</${Luminova.Components.Button}>
+                            <${Luminova.Components.Button} onClick=${() => handleSubSave(tempQ)} className="w-full text-xl py-3 rounded-2xl shadow-[0_5px_30px_-10px_rgba(6,182,212,0.8)]">${Luminova.i18n[lang].save} السؤال</${Luminova.Components.Button}>
                         </div>
                     </div>
                 </div>
             `;
             } // End Edit Question
 
+            const allQuestions = normalizeExamQuestions(editingItem.questions || []);
+            const filteredQuestions = allQuestions.filter(q => questionMatchesSearch(q, qSearchQuery));
+
             return html`
             <div key="questions-list-view" className="animate-fade-in pb-20">
                 <div className="flex items-center justify-between mb-8 pb-4 border-b">
                     <div>
-                        <h2 className="text-3xl font-black text-brand-gold">Quiz Questions Matrix</h2>
+                        <h2 className="text-3xl font-black text-brand-gold">مصفوفة أسئلة الاختبار</h2>
                         <h3 className="text-xl font-bold opacity-70 mt-2">${editingItem.title || editingItem.titleAr || ''}</h3>
                     </div>
                     <div className="flex gap-3">
@@ -1873,31 +2681,98 @@
                     </div>
                 </div>
                 
-                <div className="mb-6"><${Luminova.Components.Button} onClick=${() => { setQItem(null); setSubView('editQuestion'); }} className="bg-green-500 hover:bg-green-600 shadow-xl shadow-green-500/20 text-xl py-3 px-8">+ Add Question</${Luminova.Components.Button}></div>
+                <div className="mb-6 flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
+                    <${Luminova.Components.Button} onClick=${() => { setQItem(null); setSubView('editQuestion'); }} className="bg-green-500 hover:bg-green-600 shadow-xl shadow-green-500/20 text-xl py-3 px-8 shrink-0 flex items-center justify-center gap-2 rounded-2xl">
+                        <span>+ إضافة سؤال</span>
+                    </${Luminova.Components.Button}>
+                    <div className="relative flex-1 max-w-md">
+                        <input 
+                            type="text" 
+                            value=${qSearchQuery} 
+                            onChange=${e => setQSearchQuery(e.target.value)} 
+                            placeholder="ابحث داخل أسئلة الاختبار..." 
+                            className="w-full px-5 py-3 pr-12 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 font-bold focus:border-brand-DEFAULT outline-none transition-all text-right" 
+                            dir="rtl"
+                        />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-lg">🔍</span>
+                        ${qSearchQuery && html`
+                            <button key="clear-q-search" onClick=${() => setQSearchQuery('')} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 font-black text-lg p-1">✕</button>
+                        `}
+                    </div>
+                </div>
+
+                <div className="mb-4 text-sm font-bold text-gray-600 dark:text-gray-400">
+                    عدد الأسئلة المطابقة: ${filteredQuestions.length} من إجمالي ${allQuestions.length}
+                </div>
                 
                 <div className="space-y-4">
-                    ${(editingItem.questions || []).map((q, idx) => html`
-                        <${Luminova.Components.GlassCard} key=${q.id || `q_${idx}`} className="flex justify-between items-center border-l-4 border-brand-DEFAULT">
-                            <div>
-                                <span className="font-bold mr-4 text-brand-DEFAULT">Q${idx + 1}.</span>
-                                <span className="text-lg font-bold">${q.textAr || q.textEn || 'Draft Question'}</span>
-                                <div className="text-xs opacity-50 mt-1">${q.type} - Score: ${q.score}</div>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick=${() => { setQItem(q); setSubView('editQuestion'); }} className="p-3 bg-blue-500/10 text-blue-500 rounded-lg hover:bg-blue-500 hover:text-white transition-colors"><${Luminova.Icons.Edit} /></button>
-                                <button onClick=${() => {
-                    if (confirm('Delete Question?')) {
-                        const updatedQ = editingItem.questions.filter(x => x.id !== q.id);
-                        const updatedQuiz = { ...editingItem, questions: updatedQ };
-                        setEditingItem(updatedQuiz);
-                        setData(prev => ({ ...prev, [activeTab]: prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i) }));
-                    }
-                }} className="p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors"><${Luminova.Icons.Trash} /></button>
-                            </div>
-                        </${Luminova.Components.GlassCard}>
-                    `)}
-                    ${(!editingItem.questions || editingItem.questions.length === 0) && html`
-                        <div className="p-10 border-2 border-dashed rounded-2xl text-center font-bold opacity-50">لا يوجد أسئلة.. أضف سؤالاً للاختبار.</div>
+                    ${filteredQuestions.map((q) => {
+                        const originalIdx = allQuestions.findIndex(x => x.id === q.id);
+                        return html`
+                            <${Luminova.Components.GlassCard} key=${q.id || `q_${originalIdx}`} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-l-4 border-brand-DEFAULT p-4">
+                                <div className="flex-1 min-w-0 text-right" dir="rtl">
+                                    <div className="flex items-start gap-2">
+                                        <span className="font-bold text-brand-DEFAULT shrink-0 text-lg">س${originalIdx + 1}.</span>
+                                        <span className="text-lg font-bold text-gray-800 dark:text-gray-200 break-words cursor-help" title=${q.text || q.textAr || q.textEn || ''}>
+                                            ${makeQuestionPreview(q.text || q.textAr || q.textEn || 'سؤال بدون عنوان', 160)}
+                                        </span>
+                                    </div>
+                                    <div className="text-xs opacity-60 mt-2 flex flex-wrap gap-x-3 gap-y-1 font-semibold text-gray-600 dark:text-gray-400">
+                                        <span className="px-2 py-0.5 bg-brand-DEFAULT/10 text-brand-DEFAULT rounded-md">${q.type === 'mcq' ? 'اختيار من متعدد' : q.type === 'multi_select' ? 'اختيارات متعددة' : 'مقال / تعليل'}</span>
+                                        <span>درجة: ${q.score}</span>
+                                        <span>المعرّف: <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-gray-700 dark:text-gray-300">${q.questionId || q.id}</code></span>
+                                        ${q.originalIndex !== undefined && html`<span>الترتيب الأصلي: ${q.originalIndex}</span>`}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 shrink-0 self-end sm:self-center">
+                                    <button disabled=${originalIdx === 0} onClick=${() => {
+                                        const reordered = [...allQuestions];
+                                        const temp = reordered[originalIdx - 1];
+                                        reordered[originalIdx - 1] = reordered[originalIdx];
+                                        reordered[originalIdx] = temp;
+                                        const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: reordered, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
+                                        setEditingItem(updatedQuiz);
+                                        setData(prev => {
+                                            const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
+                                            window.LUMINOVA_EXAMS = newList;
+                                            return { ...prev, [activeTab]: newList };
+                                        });
+                                    }} className="p-3 bg-gray-500/10 text-gray-500 rounded-lg hover:bg-gray-500 hover:text-white transition-colors disabled:opacity-30">↑</button>
+                                    <button disabled=${originalIdx === allQuestions.length - 1} onClick=${() => {
+                                        const reordered = [...allQuestions];
+                                        const temp = reordered[originalIdx + 1];
+                                        reordered[originalIdx + 1] = reordered[originalIdx];
+                                        reordered[originalIdx] = temp;
+                                        const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: reordered, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
+                                        setEditingItem(updatedQuiz);
+                                        setData(prev => {
+                                            const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
+                                            window.LUMINOVA_EXAMS = newList;
+                                            return { ...prev, [activeTab]: newList };
+                                        });
+                                    }} className="p-3 bg-gray-500/10 text-gray-500 rounded-lg hover:bg-gray-500 hover:text-white transition-colors disabled:opacity-30">↓</button>
+                                    <button onClick=${() => { setQItem(q); setSubView('editQuestion'); }} className="p-3 bg-blue-500/10 text-blue-500 rounded-lg hover:bg-blue-500 hover:text-white transition-colors"><${Luminova.Icons.Edit} /></button>
+                                    <button onClick=${() => {
+                                        if (confirm('هل تريد حذف السؤال؟')) {
+                                            const updatedQ = allQuestions.filter(x => x.id !== q.id);
+                                            const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: updatedQ, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
+                                            setEditingItem(updatedQuiz);
+                                            setData(prev => {
+                                                const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
+                                                window.LUMINOVA_EXAMS = newList;
+                                                return { ...prev, [activeTab]: newList };
+                                            });
+                                        }
+                                    }} className="p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors"><${Luminova.Icons.Trash} /></button>
+                                </div>
+                            </${Luminova.Components.GlassCard}>
+                        `;
+                    })}
+                    ${allQuestions.length === 0 && html`
+                        <div key="empty-questions-alert" className="p-10 border-2 border-dashed rounded-2xl text-center font-bold opacity-50">لا يوجد أسئلة.. أضف سؤالاً للاختبار.</div>
+                    `}
+                    ${allQuestions.length > 0 && filteredQuestions.length === 0 && html`
+                        <div key="no-matching-questions-alert" className="p-10 border-2 border-dashed rounded-2xl text-center font-bold opacity-50">لا توجد أسئلة تطابق البحث.</div>
                     `}
                 </div>
             </div>
@@ -1939,11 +2814,17 @@
             activeTableItems = activeTableItems.filter(item =>
                 (item.nameAr || item.titleAr || item.title || item.name || item.studentName || '').toLowerCase().includes(query) ||
                 (item.nameEn || item.titleEn || item.title || item.studentNameEn || '').toLowerCase().includes(query) ||
-                item.id.toLowerCase().includes(query)
+                String(item.id || '').toLowerCase().includes(query)
             );
         }
 
         const displayedTableItems = activeTableItems.slice(0, cmsVisibleCount);
+        const isEditingEvaluativeExam = activeTab === 'quizzes' && editingItem && editingItem.examMode === 'evaluation';
+        const editingExamControl = isEditingEvaluativeExam
+            ? normalizeExamForControl({ ...editingItem, transactionalSubmissionEnabled: editingItem.transactionalSubmissionEnabled !== false }, { settings: data.settings || {} })
+            : null;
+        const editingExamBadge = editingExamControl ? getSubmissionStatusBadge(editingExamControl.submissionStatus) : null;
+        const editingExamWebhookStatus = editingExamControl ? validateWebhookUrl(editingExamControl.webhookUrl) : null;
 
         return html`
         <div className="animate-fade-in pb-20 max-w-[1400px] mx-auto px-3 sm:px-6">
@@ -1951,28 +2832,28 @@
                 <h2 className="text-2xl sm:text-4xl font-black flex items-center gap-3 text-transparent bg-clip-text bg-gradient-to-r from-brand-hover to-brand-gold">⚙️ CMS</h2>
                 <div className="flex gap-2 sm:gap-3 flex-wrap w-full sm:w-auto justify-end">
 
-                    ${/* Always visible: Export core data.js */ html`
+                    
                         <${Luminova.Components.Button}
                             key="export-data"
                             onClick=${handleExportData}
                             className="bg-brand-DEFAULT text-white shadow-lg hover:bg-brand-hover text-sm sm:text-base px-4 sm:px-6"
-                            title=${lang === 'ar' ? 'تصدير الإعدادات والأخبار والطلاب والمواد والتلخيصات' : 'Export settings, news, students, subjects & summaries'}
+                            title=${lang === 'ar' ? 'تصدير الإعدادات والأخبار والطلاب والمواد والتلخيصات' : 'تصدير الإعدادات والأخبار والطلاب والمواد والتلخيصات'}
                         >
                             <span className="animate-pulse">💾</span>
-                            <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير data.js' : 'Export data.js'}</span>
+                            <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير data.js' : 'تصدير data.js'}</span>
                             <span className="sm:hidden">data.js</span>
                         </${Luminova.Components.Button}>
-                    `}
+                    
 
                     ${/* Context-sensitive: show certificates export only on certificates tab */ activeTab === 'certificates' && html`
                         <${Luminova.Components.Button}
                             key="export-certs"
                             onClick=${handleExportCertificates}
-                            className="bg-brand-gold text-black shadow-lg hover:bg-yellow-500 text-sm sm:text-base px-4 sm:px-6"
-                            title=${lang === 'ar' ? 'تصدير ملف الشهادات فقط' : 'Export certificates.js only'}
+                            className="bg-brand-gold text-black shadow-lg hover:bg-yellow-500 text-sm sm:text-base px-4 sm:px-6 rounded-2xl"
+                            title=${lang === 'ar' ? 'تصدير ملف الشهادات فقط' : 'تصدير ملف الشهادات فقط'}
                         >
                             <span>📜</span>
-                            <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير certificates.js' : 'Export certificates.js'}</span>
+                            <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير certificates.js' : 'تصدير certificates.js'}</span>
                             <span className="sm:hidden">certs.js</span>
                         </${Luminova.Components.Button}>
                     `}
@@ -1981,21 +2862,21 @@
                         <${Luminova.Components.Button}
                             key="export-exams"
                             onClick=${handleExportExams}
-                            className="bg-indigo-500 text-white shadow-lg hover:bg-indigo-600 text-sm sm:text-base px-4 sm:px-6"
-                            title=${lang === 'ar' ? 'تصدير ملف الاختبارات فقط' : 'Export exam.js only'}
+                            className="bg-indigo-500 text-white shadow-lg hover:bg-indigo-600 text-sm sm:text-base px-4 sm:px-6 rounded-2xl"
+                            title=${lang === 'ar' ? 'تصدير ملف الاختبارات فقط' : 'تصدير ملف الاختبارات فقط'}
                         >
                             <span>📝</span>
-                            <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير exam.js' : 'Export exam.js'}</span>
+                            <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير exam.js' : 'تصدير exam.js'}</span>
                             <span className="sm:hidden">exam.js</span>
                         </${Luminova.Components.Button}>
                     `}
 
-                    <${Luminova.Components.Button} variant="danger" onClick=${goBack} className="text-sm sm:text-base px-4 sm:px-8">${Luminova.i18n[lang].logout}</${Luminova.Components.Button}>
+                    <${Luminova.Components.Button} key="logout-btn" variant="danger" onClick=${goBack} className="text-sm sm:text-base px-4 sm:px-8 rounded-2xl">${Luminova.i18n[lang].logout}</${Luminova.Components.Button}>
                 </div>
             </div>
 
-            <div className="flex flex-col xl:flex-row gap-4 sm:gap-8">
-                <div className="w-full xl:w-1/4">
+            <div key="cms-main-content" className="flex flex-col xl:flex-row gap-4 sm:gap-8">
+                <div key="cms-sidebar" className="w-full xl:w-1/4">
                     <div className="xl:sticky xl:top-40">
                         <div className="flex xl:flex-col gap-2 sm:gap-3 overflow-x-auto xl:overflow-x-visible pb-2 xl:pb-0 scrollbar-hide bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl xl:rounded-3xl p-3 sm:p-4 shadow-lg border border-white/20 dark:border-gray-700/30">
                         ${validTabs.map(key => html`
@@ -2011,23 +2892,23 @@
                     </div>
                 </div>
 
-                <div className="w-full xl:w-3/4">
+                <div key="cms-content-card-wrapper" className="w-full xl:w-3/4">
                     <${Luminova.Components.GlassCard} className="border-none shadow-2xl bg-white/40 dark:bg-black/20 backdrop-blur-3xl min-h-[50vh] xl:min-h-[70vh]">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 sm:mb-8 border-b dark:border-gray-700 pb-4 sm:pb-6 px-4 gap-4">
+                        <div key="glasscard-header" className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 sm:mb-8 border-b dark:border-gray-700 pb-4 sm:pb-6 px-4 gap-4">
                             <h3 className="text-2xl sm:text-4xl font-black text-brand-DEFAULT shrink-0">${Luminova.i18n[lang][activeTab] || activeTab}</h3>
                             ${!editingItem && html`
                                 <div key="search-add-bar" className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto sm:flex-1 sm:max-w-xl sm:justify-end items-stretch">
-                                    <input type="text" placeholder=${lang === 'ar' ? 'بحث في هذا القسم...' : 'Search in this section...'} value=${cmsSearchQuery} onChange=${e => setCmsSearchQuery(e.target.value)} className="w-full sm:flex-1 p-4 rounded-2xl bg-white/80 dark:bg-slate-900/80 border-2 border-brand-DEFAULT/30 focus:border-brand-DEFAULT focus:shadow-[0_0_20px_rgba(6,182,212,0.6)] outline-none shadow-lg text-brand-DEFAULT dark:text-brand-gold font-black placeholder:text-gray-400 text-sm sm:text-base transition-all" />
+                                    <input type="text" placeholder=${lang === 'ar' ? 'بحث في هذا القسم...' : 'بحث في هذا القسم...'} value=${cmsSearchQuery} onChange=${e => setCmsSearchQuery(e.target.value)} className="w-full sm:flex-1 p-4 rounded-2xl bg-white/80 dark:bg-slate-900/80 border-2 border-brand-DEFAULT/30 focus:border-brand-DEFAULT focus:shadow-[0_0_20px_rgba(6,182,212,0.6)] outline-none shadow-lg text-brand-DEFAULT dark:text-brand-gold font-black placeholder:text-gray-400 text-sm sm:text-base transition-all" />
                                     ${activeTab === 'quizzes' && html`
                                         <div key="import-merge-zone" className="relative overflow-hidden group border-none">
                                             <${Luminova.Components.Button} className="text-base sm:text-lg px-4 sm:px-6 py-3 sm:py-4 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 hover:shadow-[0_0_20px_rgba(99,102,241,0.5)] transition-all font-black shrink-0 justify-center border-none flex items-center gap-2">
-                                                <span>📥</span> ${lang === 'ar' ? 'رفع ودمج ملفات الاختبار' : 'Import & Merge Exam Files'}
+                                                <span>📥</span> ${lang === 'ar' ? 'رفع ودمج ملفات الاختبار' : 'رفع ودمج ملفات الاختبار'}
                                             </${Luminova.Components.Button}>
-                                            <input type="file" multiple accept=".js,.json" onChange=${handleMultiExamImport} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="Import & Merge Exam Files" />
+                                            <input type="file" multiple accept=".js,.json" onChange=${handleMultiExamImport} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="رفع ودمج ملفات الاختبار" />
                                         </div>
                                     `}
                                     <${Luminova.Components.Button} key="add-new-btn" onClick=${() => setEditingItem(getNewTemplate())} className="text-base sm:text-xl px-6 sm:px-10 py-3 sm:py-4 rounded-2xl bg-gradient-to-r from-brand-DEFAULT to-brand-hover hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-black shrink-0 justify-center border-none">
-                                        ${lang === 'ar' ? '+ إضافة جديد' : '+ Add New'}
+                                        ${lang === 'ar' ? '+ إضافة جديد' : '+ إضافة جديد'}
                                     </${Luminova.Components.Button}>
                                 </div>
                             `}
@@ -2042,16 +2923,16 @@
                         ${!editingItem && ['subjects', 'summaries', 'quizzes'].includes(activeTab) && html`
                             <div key="table-filters" className="flex flex-col sm:flex-row gap-3 sm:gap-4 px-4 mb-6 relative z-10">
                                 <select key="filter-year" value=${filterYear} onChange=${e => { setFilterYear(e.target.value); setFilterSem(''); setFilterSub(''); }} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1">
-                                    <option value="">${lang === 'ar' ? 'كل الفرق (All Years)' : 'All Years'}</option>
+                                    <option value="">${lang === 'ar' ? 'كل الفرق' : 'كل الفرق'}</option>
                                     ${data.years.map(y => html`<option key=${y.id} value=${y.id}>${y.nameAr || y.name}</option>`)}
                                 </select>
                                 <select key="filter-semester" value=${filterSem} onChange=${e => { setFilterSem(e.target.value); setFilterSub(''); }} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1 text-brand-DEFAULT">
-                                    <option value="">${lang === 'ar' ? 'كل الأترام (All Semesters)' : 'All Semesters'}</option>
+                                    <option value="">${lang === 'ar' ? 'كل الأترام' : 'كل الأترام'}</option>
                                     ${data.semesters.filter(s => !filterYear || s.yearId === filterYear).map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
                                 </select>
                                 ${['summaries', 'quizzes'].includes(activeTab) && html`
                                     <select key="filter-subject" value=${filterSub} onChange=${e => setFilterSub(e.target.value)} className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 font-bold outline-none flex-1 text-brand-hover">
-                                        <option value="">${lang === 'ar' ? 'كل المواد (All Subjects)' : 'All Subjects'}</option>
+                                        <option value="">${lang === 'ar' ? 'كل المواد' : 'كل المواد'}</option>
                                         ${data.subjects.filter(s => {
                                             if (filterSem) return s.semesterId === filterSem;
                                             if (filterYear) {
@@ -2068,35 +2949,35 @@
                         ${editingItem ? html`
                             <div key="editing-form-container" className="bg-white/70 dark:bg-gray-900/70 p-8 rounded-3xl border-2 border-brand-DEFAULT/20 shadow-inner">
                                 <div className="flex justify-between items-center mb-8 border-b dark:border-gray-700 pb-4">
-                                    <h4 className="text-2xl font-black text-brand-gold">${editingItem.id.includes(activeTab) ? (lang === 'ar' ? 'إنشاء سجل جديد' : 'Create New Record') : (lang === 'ar' ? 'تعديل السجل' : 'Edit Record')}</h4>
+                                    <h4 className="text-2xl font-black text-brand-gold">${editingItem.id.includes(activeTab) ? (lang === 'ar' ? 'إنشاء سجل جديد' : 'إنشاء سجل جديد') : (lang === 'ar' ? 'تعديل السجل' : 'تعديل السجل')}</h4>
                                     ${activeTab === 'quizzes' && html`
                                         <${Luminova.Components.Button} key="manage-q-matrix" onClick=${() => setSubView('questionsList')} className="bg-blue-600 hover:bg-blue-700 text-lg px-8 relative overflow-hidden group">
-                                            <span className="relative z-10 w-full flex items-center gap-2">📝 Manage Questions Matrix <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">${(editingItem.questions || []).length}</span></span>
+                                            <span className="relative z-10 w-full flex items-center gap-2">📝 إدارة مصفوفة الأسئلة <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">${(editingItem.questions || []).length}</span></span>
                                         </${Luminova.Components.Button}>
                                     `}
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
-                                    ${(activeTab === 'semesters' || activeTab === 'subjects' || activeTab === 'summaries' || activeTab === 'quizzes') && html`
-                                        <div className="col-span-2 md:col-span-1">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الفرقة (Year Hierarchy)</label>
+                                    ${(activeTab === 'semesters' || activeTab === 'subjects' || activeTab === 'summaries') && html`
+                                        <div key="edit-year-select" className="col-span-2 md:col-span-1">
+                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الفرقة</label>
                                             <select value=${editingItem.yearId || ''} onChange=${e => setEditingItem({ ...editingItem, yearId: e.target.value, semesterId: '', subjectId: '' })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-brand-DEFAULT/30 font-bold outline-none ring-0">
                                                 <option value="">-- اختار الفرقة --</option>
                                                 ${data.years.map(y => html`<option key=${y.id} value=${y.id}>${y.nameAr || y.name}</option>`)}
                                             </select>
                                         </div>
                                     `}
-                                    ${(activeTab === 'subjects' || activeTab === 'summaries' || activeTab === 'quizzes') && html`
-                                        <div className="col-span-2 md:col-span-1">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الترم (Semester Hierarchy)</label>
+                                    ${(activeTab === 'subjects' || activeTab === 'summaries') && html`
+                                        <div key="edit-semester-select" className="col-span-2 md:col-span-1">
+                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الترم</label>
                                             <select value=${editingItem.semesterId || ''} onChange=${e => setEditingItem({ ...editingItem, semesterId: e.target.value, subjectId: '' })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-brand-DEFAULT/30 font-bold outline-none ring-0">
                                                 <option value="">-- اختار الترم --</option>
                                                 ${data.semesters.filter(s => !editingItem.yearId || s.yearId === editingItem.yearId).map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
                                             </select>
                                         </div>
                                     `}
-                                    ${(activeTab === 'summaries' || activeTab === 'quizzes') && html`
-                                        <div className="col-span-2">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-hover drop-shadow-sm">المادة (Subject Link)</label>
+                                    ${(activeTab === 'summaries') && html`
+                                        <div key="edit-subject-select" className="col-span-2">
+                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-hover drop-shadow-sm">المادة</label>
                                             <select value=${editingItem.subjectId || ''} onChange=${e => setEditingItem({ ...editingItem, subjectId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-brand-hover/50 font-bold outline-none ring-0">
                                                 <option value="">-- اختار المادة --</option>
                                                 ${data.subjects.filter(s => {
@@ -2111,8 +2992,8 @@
                                         </div>
                                     `}
                                     ${(activeTab === 'summaries') && html`
-                                        <div className="col-span-2">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-gold drop-shadow-sm">الطالب المساهم (Author)</label>
+                                        <div key="edit-student-select" className="col-span-2">
+                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-gold drop-shadow-sm">الطالب المساهم</label>
                                             <select value=${editingItem.studentId || ''} onChange=${e => setEditingItem({ ...editingItem, studentId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-brand-gold/50 font-bold outline-none ring-0">
                                                 <option value="">-- اختار الطالب --</option>
                                                 ${studentsWithFounder.map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
@@ -2121,19 +3002,19 @@
                                     `}
 
                                     ${activeTab === 'certificates' ? html`
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم الطالب المُكرم (Recipient Name - Arabic)" val=${editingItem.studentName} onChange=${v => setEditingItem({ ...editingItem, studentName: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم الطالب المُكرم (Recipient Name - English)" val=${editingItem.studentNameEn} onChange=${v => setEditingItem({ ...editingItem, studentNameEn: v })} /></div>
+                                        <div key="cert-student-name" className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم الطالب المُكرم بالعربية" val=${editingItem.studentName} onChange=${v => setEditingItem({ ...editingItem, studentName: v })} /></div>
+                                        <div key="cert-student-name-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم الطالب المُكرم بلغة أخرى" val=${editingItem.studentNameEn} onChange=${v => setEditingItem({ ...editingItem, studentNameEn: v })} /></div>
                                         
-                                        <div className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT">اسم المرسل/المانح (Sender Name - Arabic)</label>
+                                        <div key="cert-sender-name" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT">اسم المرسل/المانح بالعربية</label>
                                             <input list="senderPresets" value=${editingItem.senderName || ''} onChange=${e => setEditingItem({ ...editingItem, senderName: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 font-bold outline-none focus:border-brand-DEFAULT transition-all" placeholder="محمود عبد الرحمن" />
                                             <datalist id="senderPresets">
                                                 <option value="محمود عبد الرحمن" />
                                             </datalist>
                                         </div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم المرسل/المانح (Sender Name - English)" val=${editingItem.senderNameEn} onChange=${v => setEditingItem({ ...editingItem, senderNameEn: v })} /></div>
+                                        <div key="cert-sender-name-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم المرسل/المانح بلغة أخرى" val=${editingItem.senderNameEn} onChange=${v => setEditingItem({ ...editingItem, senderNameEn: v })} /></div>
                                         
-                                        <div className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                        <div key="cert-sender-role" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
                                             <label className="block text-sm font-black mb-3 opacity-80 text-brand-DEFAULT">دور المرسل أكاديمياً (Sender Role)</label>
                                             <select 
                                                 value=${['زميل أكاديمي', 'دكتور مادة', 'مسؤول المنصة'].includes(editingItem.senderRole) ? editingItem.senderRole : (editingItem.senderRole ? 'custom' : '')} 
@@ -2149,14 +3030,14 @@
                                                 <option value="custom">✏️ تخصيص...</option>
                                             </select>
                                             ${!['زميل أكاديمي', 'دكتور مادة', 'مسؤول المنصة', ''].includes(editingItem.senderRole) && html`
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                                                    <${Luminova.Components.Input} label="Sender Role - Arabic" val=${editingItem.senderRole} onChange=${v => setEditingItem({ ...editingItem, senderRole: v })} />
-                                                    <${Luminova.Components.Input} label="Sender Role - English" val=${editingItem.senderRoleEn || ''} onChange=${v => setEditingItem({ ...editingItem, senderRoleEn: v })} />
+                                                <div key="cert-custom-sender-role-inputs" className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                                                    <${Luminova.Components.Input} label="صفة المرسل بالعربية" val=${editingItem.senderRole} onChange=${v => setEditingItem({ ...editingItem, senderRole: v })} />
+                                                    <${Luminova.Components.Input} label="صفة المرسل بلغة أخرى" val=${editingItem.senderRoleEn || ''} onChange=${v => setEditingItem({ ...editingItem, senderRoleEn: v })} />
                                                 </div>
                                             `}
                                         </div>
-                                        <div className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                             <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT">عنوان الشهادة (Title - Arabic Preset)</label>
+                                        <div key="cert-title-select" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                             <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT">عنوان الشهادة من القائمة</label>
                                              <select 
                                                  value=${['شهادة إثراء محتوى تقني', 'شهادة بطل الدفعة', 'شهادة تقدير تميز أكاديمي', 'شهادة مساهمة فعالة'].includes(editingItem.title) ? editingItem.title : (editingItem.title ? 'custom' : '')} 
                                                  onChange=${e => {
@@ -2171,12 +3052,12 @@
                                                  <option value="شهادة مساهمة فعالة">شهادة مساهمة فعالة</option>
                                                  <option value="custom">✏️ كتابة مخصصة...</option>
                                              </select>
-                                             <${Luminova.Components.Input} label="عنوان الشهادة (Title - Arabic Custom)" val=${editingItem.title} onChange=${v => setEditingItem({ ...editingItem, title: v })} />
+                                             <${Luminova.Components.Input} label="عنوان الشهادة المخصص" val=${editingItem.title} onChange=${v => setEditingItem({ ...editingItem, title: v })} />
                                         </div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان الشهادة (Title - English)" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
+                                        <div key="cert-title-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان الشهادة بلغة أخرى" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
                                         
-                                        <div className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                             <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT">الوصف وسبب المنح (Reason - Arabic Preset)</label>
+                                        <div key="cert-desc-select" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                             <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT">الوصف وسبب المنح من القائمة</label>
                                              <select 
                                                  value=${['تقديراً للمجهود الرائع والمشاركات الفعالة في إثراء المحتوى الأكاديمي.', 'لتفوقه الملحوظ وحصوله على أعلى الدرجات في التقييمات الأكاديمية.', 'لمساهمته الفعالة والمستمرة في دعم ومساعدة زملاء الدفعة.'].includes(editingItem.description) ? editingItem.description : (editingItem.description ? 'custom' : '')} 
                                                  onChange=${e => {
@@ -2190,91 +3071,91 @@
                                                  <option value="لمساهمته الفعالة والمستمرة في دعم ومساعدة زملاء الدفعة.">لمساهمته الفعالة والمستمرة في دعم ومساعدة زملاء الدفعة.</option>
                                                  <option value="custom">✏️ كتابة مخصصة...</option>
                                              </select>
-                                             <${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح (Reason - Arabic Custom)" val=${editingItem.description} onChange=${v => setEditingItem({ ...editingItem, description: v })} />
+                                             <${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح المخصص" val=${editingItem.description} onChange=${v => setEditingItem({ ...editingItem, description: v })} />
                                         </div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح (Reason - English)" val=${editingItem.descriptionEn} onChange=${v => setEditingItem({ ...editingItem, descriptionEn: v })} /></div>
-                                        <div className="col-span-2 w-full p-4 border border-brand-DEFAULT rounded-xl"><${Luminova.Components.Input} type="checkbox" label="📌 إظهار كشهادة رئيسية في المنصة (Featured Certificate)" val=${editingItem.isFeatured} onChange=${v => setEditingItem({ ...editingItem, isFeatured: v })} /></div>
+                                        <div key="cert-desc-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح بلغة أخرى" val=${editingItem.descriptionEn} onChange=${v => setEditingItem({ ...editingItem, descriptionEn: v })} /></div>
+                                        <div key="cert-featured" className="col-span-2 w-full p-4 border border-brand-DEFAULT rounded-xl"><${Luminova.Components.Input} type="checkbox" label="📌 إظهار كشهادة رئيسية في المنصة" val=${editingItem.isFeatured} onChange=${v => setEditingItem({ ...editingItem, isFeatured: v })} /></div>
                                         
-                                        <div className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                            <label className="block text-sm font-black mb-3 opacity-80 tracking-wide text-brand-gold">مستوى الشهادة (Certificate Level)</label>
+                                        <div key="cert-level" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                            <label className="block text-sm font-black mb-3 opacity-80 tracking-wide text-brand-gold">مستوى الشهادة</label>
                                             <select value=${editingItem.level || 'standard'} onChange=${e => setEditingItem({ ...editingItem, level: e.target.value })} className="w-full p-4 rounded-xl bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-2 border-brand-gold font-black outline-none shadow-sm cursor-pointer">
-                                                <option value="standard">عادية 📜 (Standard - No Seal)</option>
-                                                <option value="gold">ذهبية 🏅 (Gold Seal)</option>
-                                                <option value="silver">فضية 🥈 (Silver Seal)</option>
+                                                <option value="standard">عادية 📜</option>
+                                                <option value="gold">ذهبية 🏅</option>
+                                                <option value="silver">فضية 🥈</option>
                                             </select>
                                         </div>
                                         
                                         <!-- REALTIME LIVE PREVIEW -->
                                         ${window.Luminova?.Components?.CertificateCard ? html`
-                                        <div className="col-span-2 mt-8 py-8 bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-gray-800 rounded-3xl overflow-hidden relative group">
+                                        <div key="cert-live-preview-box" className="col-span-2 mt-8 py-8 bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-gray-800 rounded-3xl overflow-hidden relative group">
                                             <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-                                            <h4 className="font-black text-center mb-6 tracking-[0.3em] opacity-40">✨ LIVE CSS PREVIEW</h4>
+                                            <h4 className="font-black text-center mb-6 tracking-[0.3em] opacity-40">✨ معاينة مباشرة للشهادة</h4>
                                             <div className="w-full flex justify-center origin-top pointer-events-none scale-[0.55] sm:scale-75 lg:scale-[0.85] transition-transform" style=${{ transformOrigin: 'top center' }}>
                                                 <div className="w-[1000px] shadow-2xl">
                                                     <${Luminova.Components.CertificateCard} certificate=${editingItem} lang=${lang} />
                                                 </div>
                                             </div>
                                         </div>
-                                        ` : html`<div className="col-span-2 p-10 text-center font-bold opacity-50">Loading Certificate Engine Viewer...</div>`}
+                                        ` : html`<div key="cert-preview-loading" className="col-span-2 p-10 text-center font-bold opacity-50">جاري تحميل معاينة الشهادة...</div>`}
                                     ` : activeTab === 'students' ? html`
-                                        <div className="col-span-2 flex flex-col md:flex-row gap-4"><div className="w-full"><${Luminova.Components.Input} label="الاسم العربي" val=${editingItem.nameAr} onChange=${v => setEditingItem({ ...editingItem, nameAr: v })} /></div> <div className="w-full"><${Luminova.Components.Input} label="English Name" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div></div>
-                                        <div className="col-span-2 flex flex-col md:flex-row gap-4"><div className="w-full"><${Luminova.Components.Input} label="التخصص العربي" val=${editingItem.majorAr} onChange=${v => setEditingItem({ ...editingItem, majorAr: v })} /></div> <div className="w-full"><${Luminova.Components.Input} label="English Major" val=${editingItem.majorEn} onChange=${v => setEditingItem({ ...editingItem, majorEn: v })} /></div></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة عربية" val=${editingItem.bioAr} onChange=${v => setEditingItem({ ...editingItem, bioAr: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="English Bio" val=${editingItem.bioEn} onChange=${v => setEditingItem({ ...editingItem, bioEn: v })} /></div>
-                                        <div className="col-span-2 w-full">
+                                        <div key="stud-names" className="col-span-2 flex flex-col md:flex-row gap-4"><div className="w-full"><${Luminova.Components.Input} label="الاسم العربي" val=${editingItem.nameAr} onChange=${v => setEditingItem({ ...editingItem, nameAr: v })} /></div> <div className="w-full"><${Luminova.Components.Input} label="الاسم بلغة أخرى" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div></div>
+                                        <div key="stud-majors" className="col-span-2 flex flex-col md:flex-row gap-4"><div className="w-full"><${Luminova.Components.Input} label="التخصص العربي" val=${editingItem.majorAr} onChange=${v => setEditingItem({ ...editingItem, majorAr: v })} /></div> <div className="w-full"><${Luminova.Components.Input} label="التخصص بلغة أخرى" val=${editingItem.majorEn} onChange=${v => setEditingItem({ ...editingItem, majorEn: v })} /></div></div>
+                                        <div key="stud-bio-ar" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة عربية" val=${editingItem.bioAr} onChange=${v => setEditingItem({ ...editingItem, bioAr: v })} /></div>
+                                        <div key="stud-bio-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة بلغة أخرى" val=${editingItem.bioEn} onChange=${v => setEditingItem({ ...editingItem, bioEn: v })} /></div>
+                                        <div key="stud-media" className="col-span-2 w-full">
                                             <${Luminova.Components.UniversalMediaInput} label="مرفقات الطالب / الصورة الشخصية" attachments=${editingItem.mediaUrls || (editingItem.image ? [editingItem.image] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, image: v[0] || '' })} />
                                         </div>
-                                        <div className="col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                            <${Luminova.Components.SocialInput} label="Facebook Link" val=${editingItem.socialLinks?.facebook} onChange=${v => setEditingItem({ ...editingItem, socialLinks: { ...(editingItem.socialLinks || {}), facebook: v } })} /> 
-                                            <${Luminova.Components.SocialInput} label="Instagram Link" val=${editingItem.socialLinks?.instagram} onChange=${v => setEditingItem({ ...editingItem, socialLinks: { ...(editingItem.socialLinks || {}), instagram: v } })} /> 
-                                            <${Luminova.Components.SocialInput} label="LinkedIn Link" val=${editingItem.socialLinks?.linkedin} onChange=${v => setEditingItem({ ...editingItem, socialLinks: { ...(editingItem.socialLinks || {}), linkedin: v } })} />
+                                        <div key="stud-social" className="col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                            <${Luminova.Components.SocialInput} label="رابط فيسبوك" val=${editingItem.socialLinks?.facebook} onChange=${v => setEditingItem({ ...editingItem, socialLinks: { ...(editingItem.socialLinks || {}), facebook: v } })} /> 
+                                            <${Luminova.Components.SocialInput} label="رابط إنستجرام" val=${editingItem.socialLinks?.instagram} onChange=${v => setEditingItem({ ...editingItem, socialLinks: { ...(editingItem.socialLinks || {}), instagram: v } })} /> 
+                                            <${Luminova.Components.SocialInput} label="رابط لينكدإن" val=${editingItem.socialLinks?.linkedin} onChange=${v => setEditingItem({ ...editingItem, socialLinks: { ...(editingItem.socialLinks || {}), linkedin: v } })} />
                                         </div>
-                                        <div className="col-span-2 flex gap-8 pt-6 border-t border-gray-200 dark:border-gray-700">
-                                            <${Luminova.Components.Input} type="checkbox" label="⭐ VIP Member (مميز الإطار الخارجي)" val=${editingItem.isVIP} onChange=${v => { setEditingItem({ ...editingItem, isVIP: v }) }} />
-                                            <${Luminova.Components.Input} type="checkbox" label="🔵✔️ Verified (شارة توثيق زرقاء)" val=${editingItem.isVerified} onChange=${v => { setEditingItem({ ...editingItem, isVerified: v }) }} />
+                                        <div key="stud-flags" className="col-span-2 flex gap-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+                                            <${Luminova.Components.Input} type="checkbox" label="⭐ عضو مميز بإطار خاص" val=${editingItem.isVIP} onChange=${v => { setEditingItem({ ...editingItem, isVIP: v }) }} />
+                                            <${Luminova.Components.Input} type="checkbox" label="🔵✔️ موثق بشارة زرقاء" val=${editingItem.isVerified} onChange=${v => { setEditingItem({ ...editingItem, isVerified: v }) }} />
                                         </div>
-                                        <div className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                            <label className="block text-sm font-black mb-3 opacity-80 text-teal-600 dark:text-teal-400">🎓 دور المستخدم (User Role)</label>
+                                        <div key="stud-role" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                            <label className="block text-sm font-black mb-3 opacity-80 text-teal-600 dark:text-teal-400">🎓 دور المستخدم</label>
                                             <div className="flex gap-4">
                                                 <label className="flex items-center gap-3 cursor-pointer bg-white dark:bg-gray-800 p-3 rounded-xl border-2 ${editingItem.role !== 'doctor' ? 'border-brand-DEFAULT' : 'border-gray-200 dark:border-gray-700'} shadow-sm flex-1">
                                                     <input type="radio" name="userRole" value="student" checked=${editingItem.role !== 'doctor'} onChange=${() => setEditingItem({ ...editingItem, role: 'student' })} className="w-5 h-5 accent-brand-DEFAULT" />
-                                                    <span className="font-bold">👤 طالب (Student)</span>
+                                                    <span className="font-bold">👤 طالب</span>
                                                 </label>
                                                 <label className="flex items-center gap-3 cursor-pointer bg-white dark:bg-gray-800 p-3 rounded-xl border-2 ${editingItem.role === 'doctor' ? 'border-teal-500' : 'border-gray-200 dark:border-gray-700'} shadow-sm flex-1">
                                                     <input type="radio" name="userRole" value="doctor" checked=${editingItem.role === 'doctor'} onChange=${() => setEditingItem({ ...editingItem, role: 'doctor' })} className="w-5 h-5 accent-teal-500" />
-                                                    <span className="font-bold text-teal-600 dark:text-teal-400">🎓 دكتور (Doctor)</span>
+                                                    <span className="font-bold text-teal-600 dark:text-teal-400">🎓 دكتور</span>
                                                 </label>
                                             </div>
                                         </div>
                                     ` : activeTab === 'news' ? html`
-                                        <div className="col-span-2">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الناشر (Author)</label>
+                                        <div key="news-publisher" className="col-span-2">
+                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الناشر</label>
                                             <select value=${editingItem.studentId || ''} onChange=${e => setEditingItem({ ...editingItem, studentId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-brand-DEFAULT/50 font-bold outline-none ring-0">
                                                 <option value="">-- اختار الناشر --</option>
                                                 ${studentsWithFounder.map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
                                             </select>
                                         </div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان الخبر" val=${editingItem.titleAr} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="News Title" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="التفاصيل (عربي)" val=${editingItem.contentAr} onChange=${v => setEditingItem({ ...editingItem, contentAr: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="Details (English)" val=${editingItem.contentEn} onChange=${v => setEditingItem({ ...editingItem, contentEn: v })} /></div>
-                                        <div className="col-span-2 w-full mt-2">
-                                            <${Luminova.Components.UniversalMediaInput} label="Media Attachments (مرفقات الخبر)" attachments=${editingItem.mediaUrls || (editingItem.mediaUrl ? [editingItem.mediaUrl] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, mediaUrl: '' })} />
+                                        <div key="news-title-ar" className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان الخبر" val=${editingItem.titleAr} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} /></div>
+                                        <div key="news-title-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان الخبر بلغة أخرى" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
+                                        <div key="news-content-ar" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="التفاصيل (عربي)" val=${editingItem.contentAr} onChange=${v => setEditingItem({ ...editingItem, contentAr: v })} /></div>
+                                        <div key="news-content-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="التفاصيل بلغة أخرى" val=${editingItem.contentEn} onChange=${v => setEditingItem({ ...editingItem, contentEn: v })} /></div>
+                                        <div key="news-media" className="col-span-2 w-full mt-2">
+                                            <${Luminova.Components.UniversalMediaInput} label="مرفقات الخبر" attachments=${editingItem.mediaUrls || (editingItem.mediaUrl ? [editingItem.mediaUrl] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, mediaUrl: '' })} />
                                         </div>
                                     ` : activeTab === 'summaries' ? html`
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان التلخيص" val=${editingItem.titleAr} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} label="Summary Title" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة محتوى (عربي)" val=${editingItem.contentAr} onChange=${v => setEditingItem({ ...editingItem, contentAr: v })} /></div>
-                                        <div className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="Summary Content (English)" val=${editingItem.contentEn} onChange=${v => setEditingItem({ ...editingItem, contentEn: v })} /></div>
-                                        <div className="col-span-2 flex flex-col md:flex-row gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                        <div key="sum-title-ar" className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان التلخيص" val=${editingItem.titleAr} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} /></div>
+                                        <div key="sum-title-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان التلخيص بلغة أخرى" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
+                                        <div key="sum-content-ar" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة محتوى (عربي)" val=${editingItem.contentAr} onChange=${v => setEditingItem({ ...editingItem, contentAr: v })} /></div>
+                                        <div key="sum-content-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="محتوى التلخيص بلغة أخرى" val=${editingItem.contentEn} onChange=${v => setEditingItem({ ...editingItem, contentEn: v })} /></div>
+                                        <div key="sum-meta" className="col-span-2 flex flex-col md:flex-row gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                                             <div className="w-full">
-                                                <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">نوع المحتوى (Media Type)</label>
+                                                <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">نوع المحتوى</label>
                                                 <select value=${editingItem.mediaType || 'video'} onChange=${e => setEditingItem({ ...editingItem, mediaType: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 font-bold outline-none focus:border-brand-DEFAULT transition-all">
-                                                    <option value="video">فيديو (Video)</option>
-                                                    <option value="pdf">ملف PDF (PDF File)</option>
-                                                    <option value="interactive">شرح تفاعلي (Interactive)</option>
-                                                    <option value="exam">اختبار (Exam)</option>
-                                                    <option value="other">أرشيف/أخرى (Other/Archive)</option>
+                                                    <option value="video">فيديو</option>
+                                                    <option value="pdf">ملف PDF</option>
+                                                    <option value="interactive">شرح تفاعلي</option>
+                                                    <option value="exam">اختبار</option>
+                                                    <option value="other">أرشيف / أخرى</option>
                                                 </select>
                                             </div>
                                             <div className="w-full">
@@ -2293,9 +3174,9 @@
                                             </div>
                                         </div>
                                         ${editingItem.mediaType === 'interactive' ? html`
-                                            <div className="col-span-2 w-full mt-2 p-6 rounded-2xl border-2 border-purple-400/40 bg-gradient-to-br from-purple-50/60 to-indigo-50/60 dark:from-purple-900/15 dark:to-indigo-900/15 backdrop-blur-xl shadow-lg">
+                                            <div key="sum-interactive-url" className="col-span-2 w-full mt-2 p-6 rounded-2xl border-2 border-purple-400/40 bg-gradient-to-br from-purple-50/60 to-indigo-50/60 dark:from-purple-900/15 dark:to-indigo-900/15 backdrop-blur-xl shadow-lg">
                                                 <label className="block text-sm font-black mb-3 text-purple-600 dark:text-purple-400 drop-shadow-sm flex items-center gap-2">
-                                                    <span>🧩</span> مسار ملف الدرس التفاعلي (Lesson File Path)
+                                                    <span>🧩</span> مسار ملف الدرس التفاعلي
                                                 </label>
                                                 <input
                                                     type="text"
@@ -2315,197 +3196,274 @@
                                                 />
                                                 <div className="flex items-center gap-2 mt-3">
                                                     ${editingItem.lessonUrl && /\.(jsx|js)$/i.test(editingItem.lessonUrl.trim()) && !/\s/.test(editingItem.lessonUrl.trim())
-                            ? html`<span className="text-green-500 text-sm font-bold flex items-center gap-1">✅ مسار صالح (Valid path)</span>`
+                            ? html`<span key="path-valid" className="text-green-500 text-sm font-bold flex items-center gap-1">✅ مسار صالح</span>`
                             : editingItem.lessonUrl
-                                ? html`<span className="text-red-500 text-sm font-bold flex items-center gap-1">⚠️ يجب أن ينتهي بـ .jsx أو .js بدون مسافات</span>`
-                                : html`<span className="text-gray-400 text-xs">يجب أن ينتهي المسار بـ .jsx أو .js — مثال: lessons/physics/force-sim.jsx</span>`
+                                ? html`<span key="path-invalid" className="text-red-500 text-sm font-bold flex items-center gap-1">⚠️ يجب أن ينتهي بـ .jsx أو .js بدون مسافات</span>`
+                                : html`<span key="path-help" className="text-gray-500 dark:text-gray-400 text-xs">يجب أن ينتهي المسار بـ .jsx أو .js — مثال: lessons/physics/force-sim.jsx</span>`
                         }
                                                 </div>
                                             </div>
                                         ` : html`
-                                            <div className="col-span-2 w-full mt-2">
-                                                <${Luminova.Components.UniversalMediaInput} label="Media Attachments (مرفقات التلخيص)" attachments=${editingItem.mediaUrls || (editingItem.mediaUrl ? [editingItem.mediaUrl] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, mediaUrl: '' })} />
+                                            <div key="sum-media-input" className="col-span-2 w-full mt-2">
+                                                <${Luminova.Components.UniversalMediaInput} label="مرفقات التلخيص" attachments=${editingItem.mediaUrls || (editingItem.mediaUrl ? [editingItem.mediaUrl] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, mediaUrl: '' })} />
                                             </div>
                                         `}
                                     ` : activeTab === 'quizzes' ? html`
-                                        <div className="col-span-2">
-                                            <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">ناشر الاختبار (للعرض فقط بلا مساهمات)</label>
-                                            <select value=${editingItem.publisherId || ''} onChange=${e => setEditingItem({ ...editingItem, publisherId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-brand-DEFAULT/50 font-bold outline-none ring-0">
-                                                <option value="">-- اختار الناشر ليعرض على غلاف الاختبار --</option>
-                                                ${studentsWithFounder.map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
-                                            </select>
-                                        </div>
-                                        <div className="col-span-2 w-full flex flex-col md:flex-row gap-4">
-                                            <div className="w-full"><${Luminova.Components.Input} label="عنوان الاختبار التفاعلي" val=${editingItem.titleAr || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} /></div>
-                                            <div className="w-full"><${Luminova.Components.Input} label="عنوان الاختبار التفاعلي باللغة الإنجليزية" val=${editingItem.titleEn || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
-                                        </div>
-                                        <div className="col-span-1 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white/50 dark:bg-gray-800/50">
-                                            <${Luminova.Components.Input} type="checkbox" label="ترتيب عشوائي للأسئلة" val=${editingItem.isShuffled || false} onChange=${v => setEditingItem({ ...editingItem, isShuffled: v })} />
-                                            <p className="text-xs opacity-60 mt-1">يظهر الترتيب بشكل مختلف لكل طالب لزيادة المصداقية.</p>
-                                        </div>
-                                        <div className="col-span-1 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white/50 dark:bg-gray-800/50">
-                                            <label className="block text-sm font-black mb-2 opacity-80">توقيت ظهور التعليل</label>
-                                            <select value=${editingItem.feedbackMode || 'end'} onChange=${e => setEditingItem({ ...editingItem, feedbackMode: e.target.value })} className="w-full p-3 rounded-xl bg-gray-50 border border-gray-200 dark:bg-gray-900 dark:border-gray-600 font-bold outline-none shadow-sm">
-                                                <option value="end">النتيجة مع التعليل في نهاية الاختبار</option>
-                                                <option value="immediate">تجميد فور إجابة كل سؤال وإظهار التعليل</option>
-                                            </select>
-                                        </div>
-
-                                        <!-- الإعدادات المتقدمة (Advanced Settings Redesign) -->
-                                        <div className="col-span-2 mt-8">
-                                            <h3 className="text-2xl font-black text-brand-gold mb-6 flex items-center gap-3 border-b border-brand-gold/20 pb-4">⚙️ الإعدادات المتقدمة</h3>
-                                            <div className="space-y-6">
-
-                                                <!-- Card 1: إعدادات الربط والتقييم -->
-                                                <div className="bg-slate-800/50 dark:bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
-                                                    <h4 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><span className="text-brand-DEFAULT">🔗</span> إعدادات الربط والتقييم</h4>
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                        <div className="col-span-2">
-                                                            <${Luminova.Components.Input} label="رابط Webhook (Google Apps Script)" val=${editingItem.webhookUrl !== undefined ? editingItem.webhookUrl : ''} onChange=${v => setEditingItem({ ...editingItem, webhookUrl: v })} />
-                                                        </div>
-                                                        <div className="col-span-2">
-                                                            <${Luminova.Components.Input} label="Google Sheet Name" val=${editingItem.sheetName || 'Sheet1'} onChange=${v => setEditingItem({ ...editingItem, sheetName: v })} />
-                                                        </div>
-                                                        <div className="col-span-1">
-                                                            <label className="block text-sm font-black mb-3 text-gray-300">نظام التقييم</label>
-                                                            <select value=${editingItem.examMode || 'practice'} onChange=${e => setEditingItem({ ...editingItem, examMode: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all">
-                                                                <option value="practice">تدريبي</option>
-                                                                <option value="evaluation">تقييمي</option>
-                                                            </select>
-                                                            ${editingItem.examMode === 'evaluation' && html`
-                                                                <div className="mt-4">
-                                                                    <button onClick=${handleBulkSendReports} disabled=${isSendingBulk} className="w-full p-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black shadow-[0_0_15px_rgba(79,70,229,0.5)] hover:shadow-[0_0_25px_rgba(79,70,229,0.7)] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:grayscale">
-                                                                        ${isSendingBulk ? html`<span className="animate-spin text-xl">🔄</span> جاري الإرسال...` : html`<span>📤</span> إرسال التقارير الشاملة لجميع الطلاب (يدوياً)`}
-                                                                    </button>
-                                                                    ${bulkSendStatus && html`
-                                                                        <div className=${`mt-3 p-3 rounded-xl text-sm font-black border ${bulkSendStatus.state === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-300' : bulkSendStatus.state === 'loading' ? 'bg-blue-500/10 border-blue-500/30 text-blue-300' : 'bg-green-500/10 border-green-500/30 text-green-300'}`}>
-                                                                            ${bulkSendStatus.msg}
-                                                                        </div>
-                                                                    `}
-                                                                </div>
-                                                            `}
-                                                        </div>
-                                                        ${editingItem.examMode === 'evaluation' && html`
-                                                            <div className="col-span-1 space-y-6">
-                                                                <div>
-                                                                    <label className="block text-sm font-black mb-3 text-gray-300">سياسة البريد الإلكتروني</label>
-                                                                    <select value=${editingItem.emailPolicy || 'none'} onChange=${e => setEditingItem({ ...editingItem, emailPolicy: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all">
-                                                                        <option value="none">لا إرسال</option>
-                                                                        <option value="score_only">الدرجة فقط</option>
-                                                                        <option value="answers_only">الإجابات فقط</option>
-                                                                        <option value="full_report">تقرير كامل</option>
-                                                                    </select>
-                                                                </div>
-                                                                <div>
-                                                                    <label className="block text-sm font-black mb-3 text-brand-gold">إظهار النتيجة والإجابات بعد التسليم</label>
-                                                                    <select value=${editingItem.showResultsAfter ? 'yes' : 'no'} onChange=${e => setEditingItem({ ...editingItem, showResultsAfter: e.target.value === 'yes' })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-brand-gold/50 text-brand-gold font-bold outline-none focus:border-brand-gold transition-all">
-                                                                        <option value="no">لا</option>
-                                                                        <option value="yes">نعم</option>
-                                                                    </select>
-                                                                </div>
-                                                            </div>
-                                                        `}
-                                                    </div>
+                                        <!-- كارت 1 — بيانات الاختبار -->
+                                        <div key="card-1-info" className="col-span-2 bg-white/80 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                            <h4 className="text-xl font-black text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+                                                <span className="text-brand-DEFAULT text-2xl">📋</span> بيانات الاختبار
+                                            </h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                <div className="col-span-2 md:col-span-1">
+                                                     <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الفرقة</label>
+                                                     <select value=${editingItem.yearId || ''} onChange=${e => setEditingItem({ ...editingItem, yearId: e.target.value, semesterId: '', subjectId: '' })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-slate-700 font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                         <option value="">-- اختار الفرقة --</option>
+                                                         ${data.years.map(y => html`<option key=${y.id} value=${y.id}>${y.nameAr || y.name}</option>`)}
+                                                     </select>
                                                 </div>
+                                                <div className="col-span-2 md:col-span-1">
+                                                     <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">الترم</label>
+                                                     <select value=${editingItem.semesterId || ''} onChange=${e => setEditingItem({ ...editingItem, semesterId: e.target.value, subjectId: '' })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-slate-700 font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                         <option value="">-- اختار الترم --</option>
+                                                         ${data.semesters.filter(s => !editingItem.yearId || s.yearId === editingItem.yearId).map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
+                                                     </select>
+                                                </div>
+                                                <div className="col-span-2">
+                                                     <label className="block text-sm font-black mb-2 opacity-80 text-brand-hover drop-shadow-sm">المادة</label>
+                                                     <select value=${editingItem.subjectId || ''} onChange=${e => setEditingItem({ ...editingItem, subjectId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-slate-700 font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                         <option value="">-- اختار المادة --</option>
+                                                         ${data.subjects.filter(s => {
+                                                             if (editingItem.semesterId) return s.semesterId === editingItem.semesterId;
+                                                             if (editingItem.yearId) {
+                                                                 const validSems = data.semesters.filter(sem => sem.yearId === editingItem.yearId).map(sem => sem.id);
+                                                                 return validSems.includes(s.semesterId);
+                                                             }
+                                                             return true;
+                                                         }).map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
+                                                     </select>
+                                                </div>
+                                                <div className="col-span-2">
+                                                     <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT drop-shadow-sm">ناشر الاختبار (للعرض فقط بلا مساهمات)</label>
+                                                     <select value=${editingItem.publisherId || ''} onChange=${e => setEditingItem({ ...editingItem, publisherId: e.target.value })} className="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-slate-700 font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                         <option value="">-- اختار الناشر ليعرض على غلاف الاختبار --</option>
+                                                         ${studentsWithFounder.map(s => html`<option key=${s.id} value=${s.id}>${s.nameAr || s.name}</option>`)}
+                                                     </select>
+                                                </div>
+                                                <div className="col-span-2 md:col-span-1">
+                                                    <${Luminova.Components.Input} label="عنوان الاختبار العربي" val=${editingItem.titleAr || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} />
+                                                </div>
+                                                <div className="col-span-2 md:col-span-1">
+                                                    <${Luminova.Components.Input} label="عنوان الاختبار الإنجليزي" val=${editingItem.titleEn || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} />
+                                                </div>
+                                            </div>
+                                        </div>
 
-                                                <!-- Card 2: إعدادات الوقت والتأخير -->
-                                                <div className="bg-slate-800/50 dark:bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
-                                                    <h4 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><span className="text-brand-DEFAULT">⏳</span> إعدادات الوقت والتأخير</h4>
-                                                    ${editingItem.examMode === 'evaluation' ? html`
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                            <div className="col-span-1">
-                                                                <label className="block text-sm font-black mb-3 text-gray-300">وقت البدء</label>
-                                                                <input type="datetime-local" value=${editingItem.startTime || ''} onChange=${e => setEditingItem({ ...editingItem, startTime: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
-                                                            </div>
-                                                            <div className="col-span-1">
-                                                                <label className="block text-sm font-black mb-3 text-gray-300">وقت الانتهاء</label>
-                                                                <input type="datetime-local" value=${editingItem.endTime || ''} onChange=${e => setEditingItem({ ...editingItem, endTime: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
-                                                            </div>
-                                                            <div className="col-span-2">
-                                                                <label className="block text-sm font-black mb-3 text-gray-300">سياسة التأخير</label>
-                                                                <select value=${editingItem.latePolicy || 'hard_stop'} onChange=${e => setEditingItem({ ...editingItem, latePolicy: e.target.value })} className="w-full p-4 rounded-xl bg-slate-800 dark:bg-slate-900 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all">
-                                                                    <option value="hard_stop">منع التسليم</option>
-                                                                    <option value="grace_period">تحديد كمتأخر</option>
-                                                                </select>
-                                                            </div>
-                                                            <div className="col-span-2">
-                                                                <p className="text-sm text-brand-gold font-bold bg-brand-gold/10 p-4 rounded-xl border border-brand-gold/20 flex items-center gap-3">
-                                                                    <span className="text-xl">⚠️</span> يتم حساب الوقت بدقة بناءً على توقيت القاهرة الفعلي (عبر الإنترنت) متجاهلاً إعدادات جهاز الطالب.
-                                                                </p>
-                                                            </div>
+                                        <!-- كارت 2 — سلوك الاختبار -->
+                                        <div key="card-2-behavior" className="col-span-2 bg-white/80 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                            <h4 className="text-xl font-black text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+                                                <span className="text-brand-DEFAULT text-2xl">⚙️</span> سلوك الاختبار
+                                            </h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                                <div className="col-span-1 border border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white/50 dark:bg-gray-800/50 flex flex-col justify-center">
+                                                    <${Luminova.Components.Input} type="checkbox" label="ترتيب عشوائي للأسئلة" val=${editingItem.isShuffled || false} onChange=${v => setEditingItem({ ...editingItem, isShuffled: v })} />
+                                                    <p className="text-xs opacity-60 mt-1">يظهر الترتيب بشكل مختلف لكل طالب لزيادة المصداقية.</p>
+                                                </div>
+                                                <div className="col-span-1 border border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white/50 dark:bg-gray-800/50">
+                                                    <label className="block text-sm font-black mb-2 opacity-80">توقيت ظهور التعليل</label>
+                                                    <select value=${editingItem.feedbackMode || 'end'} onChange=${e => setEditingItem({ ...editingItem, feedbackMode: e.target.value })} className="w-full p-3 rounded-xl bg-gray-50 border border-gray-200 dark:bg-gray-900 dark:border-gray-600 font-bold outline-none shadow-sm">
+                                                        <option value="end">النتيجة مع التعليل في نهاية الاختبار</option>
+                                                        <option value="immediate">تجميد فور إجابة كل سؤال وإظهار التعليل</option>
+                                                    </select>
+                                                </div>
+                                                <div className="col-span-1 border border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white/50 dark:bg-gray-800/50 flex flex-col justify-center">
+                                                    <div className="flex items-center gap-3">
+                                                        <input type="checkbox" checked=${editingItem.allowBackNavigation !== undefined ? editingItem.allowBackNavigation : true} onChange=${e => setEditingItem({ ...editingItem, allowBackNavigation: e.target.checked })} className="w-6 h-6 accent-brand-DEFAULT rounded" />
+                                                        <label className="text-sm font-black text-gray-900 dark:text-white cursor-pointer" onClick=${() => setEditingItem({ ...editingItem, allowBackNavigation: !(editingItem.allowBackNavigation !== undefined ? editingItem.allowBackNavigation : true) })}>السماح بالرجوع للسؤال السابق</label>
+                                                    </div>
+                                                    <p className="text-xs opacity-60 mt-1">يسمح للطالب بالعودة لتعديل إجاباته السابقة.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- كارت 3 — التسليم الرسمي -->
+                                        <div key="card-3-delivery" className="col-span-2 bg-white/80 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+                                                <div>
+                                                    <h4 className="text-xl font-black text-gray-900 dark:text-white flex items-center gap-2">
+                                                        <span className="text-brand-DEFAULT text-2xl">🔗</span> التسليم والتحقق
+                                                    </h4>
+                                                    <p className="text-sm font-bold opacity-70 mt-1">يتم ضبط اتصال سكربت جوجل لكل اختبار رسمي مباشرة. يجهز الشيت قبل دخول الطلاب ولا يسجل أي طالب وهمي.</p>
+                                                </div>
+                                                <div className="col-span-1 min-w-[200px]">
+                                                    <label className="block text-xs font-black mb-1 opacity-70">نوع الاختبار</label>
+                                                    <select value=${editingItem.examMode || 'practice'} onChange=${e => setEditingItem({ ...editingItem, examMode: e.target.value, transactionalSubmissionEnabled: e.target.value === 'evaluation' ? editingItem.transactionalSubmissionEnabled !== false : false })} className="w-full p-2.5 rounded-xl bg-gray-50 border border-gray-200 dark:bg-gray-900 dark:border-gray-600 font-bold outline-none text-brand-DEFAULT">
+                                                        <option value="practice">تدريبي</option>
+                                                        <option value="evaluation">رسمي</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                                ${editingItem.examMode === 'evaluation' ? html`
+                                                    <div key="eval-webhook-url" className="col-span-2">
+                                                        <${Luminova.Components.Input} label="رابط التسليم النهائي /exec" val=${editingExamControl?.webhookUrl || ''} onChange=${v => setEditingItem(normalizeExamForControl({ ...editingItem, webhookUrl: v, transactionalSubmissionEnabled: true, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} }))} />
+                                                        <p className="text-xs font-bold opacity-70 -mt-2 mb-2">رابط تطبيق الويب النهائي من سكربت جوجل ويجب أن ينتهي بـ /exec.</p>
+                                                        ${editingExamWebhookStatus && html`<p className="text-xs font-black mb-3 text-brand-DEFAULT">${editingExamWebhookStatus.message}</p>`}
+                                                    </div>
+                                                    <div key="eval-sheet-name" className="col-span-2">
+                                                        <${Luminova.Components.Input} label="اسم ورقة النتائج" val=${editingExamControl?.sheetName || ''} onChange=${v => setEditingItem(normalizeExamForControl({ ...editingItem, sheetName: sanitizeSheetName(v, 'Exam'), transactionalSubmissionEnabled: true, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} }))} />
+                                                        <p className="text-xs font-bold opacity-70 -mt-2">اسم ورقة النتائج داخل ملف ملف جوجل شيت، سيتم تسجيل إجابات الطلاب فيها.</p>
+                                                    </div>
+                                                    
+                                                    <div key="eval-stats-grid" className="col-span-2 grid grid-cols-1 md:grid-cols-4 gap-3">
+                                                        <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700"><div className="text-xs opacity-60 font-black">حالة الاتصال</div><div className="font-black text-brand-DEFAULT">${editingExamWebhookStatus?.ok ? 'صالحة' : 'تحتاج ضبط'}</div></div>
+                                                        <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700"><div className="text-xs opacity-60 font-black">حالة تجهيز الشيت</div><div className="font-black text-brand-DEFAULT">${editingExamControl?.preparedSchemaHash ? 'تم التجهيز' : 'غير مجهز'}</div></div>
+                                                        <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700"><div className="text-xs opacity-60 font-black">عدد الأسئلة المتوقع</div><div className="font-black text-brand-DEFAULT">${editingExamControl?.expectedQuestionCount || 0}</div></div>
+                                                        <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700"><div className="text-xs opacity-60 font-black">تطابق النسخة</div><div className="font-black text-brand-DEFAULT">${editingExamControl?.preparedSchemaHash === editingExamControl?.schemaHash ? 'مطابقة' : 'تحتاج تجهيز'}</div></div>
+                                                    </div>
+
+                                                    <div key="eval-action-buttons" className="col-span-2 flex flex-col sm:flex-row gap-3 items-stretch mt-2">
+                                                        <button onClick=${handleTestSubmissionConnection} disabled=${isTestingSubmission || !editingExamControl?.transactionalSubmissionEnabled} className="flex-1 p-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black disabled:opacity-50 transition-all">اختبار اتصال التسليم</button>
+                                                        <button onClick=${handlePrepareExamSheet} disabled=${isPreparingExam || !editingExamControl?.transactionalSubmissionEnabled} className="flex-1 p-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black disabled:opacity-50 transition-all">تجهيز شيت الاختبار</button>
+                                                    </div>
+
+                                                    ${submissionActionStatus && html`<div key="submission-status-alert" className="col-span-2 p-4 rounded-xl text-sm font-black border bg-brand-DEFAULT/10 border-brand-DEFAULT/30 text-brand-DEFAULT">${submissionActionStatus.msg}</div>`}
+
+                                                    <details key="eval-tech-details" className="col-span-2 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 p-4">
+                                                        <summary className="cursor-pointer font-black text-brand-gold">تفاصيل تقنية متقدمة</summary>
+                                                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-bold">
+                                                            <div><span className="opacity-60">Webhook URL</span><div className="font-mono break-all">${editingExamControl?.webhookUrl || ''}</div></div>
+                                                            <div><span className="opacity-60">Result sheet name</span><div className="font-mono break-all">${editingExamControl?.sheetName || ''}</div></div>
+                                                            <div><span className="opacity-60">Last prepare status</span><div className="font-mono break-all">${editingExamControl?.preparedAt ? `مجهز في ${editingExamControl.preparedAt} (${editingExamControl.submissionStatus})` : 'غير مجهز'}</div></div>
+                                                            <div><span className="opacity-60">Question count</span><div className="font-mono break-all">${editingExamControl?.expectedQuestionCount || 0}</div></div>
+                                                            <div><span className="opacity-60">Schema match</span><div className="font-mono break-all">${editingExamControl?.preparedSchemaHash === editingExamControl?.schemaHash ? 'مطابقة' : 'غير مطابقة'}</div></div>
+                                                            <div><span className="opacity-60">quizId</span><div className="font-mono break-all">${editingExamControl?.quizId || ''}</div></div>
                                                         </div>
-                                                    ` : html`
-                                                        <div className="text-center p-6 bg-slate-800 rounded-xl border border-slate-700/50 text-gray-400 font-bold">
-                                                            إعدادات الوقت والتأخير متاحة فقط في النظام التقييمي.
+                                                    </details>
+                                                ` : html`
+                                                    <div className="col-span-2 p-4 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-500 font-bold">
+                                                        هذا الاختبار مضبوط كـ "تدريبي". لحفظ وتجهيز نتائج الطلاب، يرجى تغيير نوع الاختبار إلى "رسمي".
+                                                    </div>
+                                                `}
+                                            </div>
+                                        </div>
+
+                                        ${editingItem.examMode === 'evaluation' && html`
+                                            <!-- كارت 4 — عرض النتيجة -->
+                                            <div key="card-4-result" className="col-span-2 bg-white/80 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                                <h4 className="text-xl font-black text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+                                                    <span className="text-brand-DEFAULT text-2xl">📊</span> عرض النتيجة
+                                                </h4>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                    <div className="col-span-2 md:col-span-1">
+                                                        <label className="block text-sm font-black mb-3 text-brand-gold">إظهار النتيجة بعد التسليم</label>
+                                                        <select value=${editingItem.showResult !== undefined ? (editingItem.showResult ? 'yes' : 'no') : (editingItem.showResultsAfter ? 'yes' : 'no')} onChange=${e => setEditingItem({ ...editingItem, showResult: e.target.value === 'yes', showResultsAfter: e.target.value === 'yes' })} className="w-full p-4 rounded-xl bg-white dark:bg-slate-900 border border-brand-gold/50 text-brand-gold font-bold outline-none focus:border-brand-gold transition-all">
+                                                            <option value="no">لا — إخفاء النتيجة تماماً</option>
+                                                            <option value="yes">نعم — عرض النتيجة</option>
+                                                        </select>
+                                                    </div>
+                                                    ${(editingItem.showResult || editingItem.showResultsAfter) && html`
+                                                        <div key="result-display-mode" className="col-span-2 md:col-span-1">
+                                                            <label className="block text-sm font-black mb-3 text-brand-gold">وضع عرض النتيجة</label>
+                                                            <select value=${editingItem.resultDisplayMode || 'score_only'} onChange=${e => setEditingItem({ ...editingItem, resultDisplayMode: e.target.value })} className="w-full p-4 rounded-xl bg-white dark:bg-slate-900 border border-brand-gold/50 text-brand-gold font-bold outline-none focus:border-brand-gold transition-all">
+                                                                <option value="score_only">الدرجة فقط</option>
+                                                                <option value="score_with_answers">الدرجة مع الإجابات</option>
+                                                                <option value="score_with_answers_and_explanations">الدرجة مع الإجابات والتعليلات</option>
+                                                            </select>
+                                                        </div>
+                                                        <div key="result-details-grid" className="col-span-2 space-y-3">
+                                                            <label className="block text-sm font-black text-brand-gold">تفاصيل العرض</label>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                <div key="show-score-chk" className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-300 dark:border-slate-600">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <input type="checkbox" checked=${editingItem.showScore !== false} onChange=${e => setEditingItem({ ...editingItem, showScore: e.target.checked })} className="w-5 h-5 accent-brand-DEFAULT rounded" />
+                                                                        <span className="text-sm font-bold">عرض الدرجة</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div key="show-percentage-chk" className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-300 dark:border-slate-600">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <input type="checkbox" checked=${editingItem.showPercentage !== false} onChange=${e => setEditingItem({ ...editingItem, showPercentage: e.target.checked })} className="w-5 h-5 accent-brand-DEFAULT rounded" />
+                                                                        <span className="text-sm font-bold">عرض النسبة المئوية</span>
+                                                                    </div>
+                                                                </div>
+                                                                ${(editingItem.resultDisplayMode === 'score_with_answers' || editingItem.resultDisplayMode === 'score_with_answers_and_explanations') && html`
+                                                                    <div key="show-correct-answers-chk" className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-300 dark:border-slate-600">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <input type="checkbox" checked=${editingItem.showCorrectAnswers !== false} onChange=${e => setEditingItem({ ...editingItem, showCorrectAnswers: e.target.checked })} className="w-5 h-5 accent-brand-DEFAULT rounded" />
+                                                                            <span className="text-sm font-bold">عرض الإجابات الصحيحة</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div key="show-model-answers-chk" className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-300 dark:border-slate-600">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <input type="checkbox" checked=${editingItem.showModelAnswers !== false} onChange=${e => setEditingItem({ ...editingItem, showModelAnswers: e.target.checked })} className="w-5 h-5 accent-brand-DEFAULT rounded" />
+                                                                            <span className="text-sm font-bold">عرض الإجابات النموذجية (المقالية)</span>
+                                                                        </div>
+                                                                    </div>
+                                                                `}
+                                                                ${editingItem.resultDisplayMode === 'score_with_answers_and_explanations' && html`
+                                                                    <div key="show-explanations-chk" className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-300 dark:border-slate-600 md:col-span-2">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <input type="checkbox" checked=${editingItem.showExplanations !== false} onChange=${e => setEditingItem({ ...editingItem, showExplanations: e.target.checked })} className="w-5 h-5 accent-brand-DEFAULT rounded" />
+                                                                            <span className="text-sm font-bold">عرض التعليلات</span>
+                                                                        </div>
+                                                                    </div>
+                                                                `}
+                                                                <div key="allow-review-chk" className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-300 dark:border-slate-600 md:col-span-2">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <input type="checkbox" checked=${editingItem.allowReviewAfterSubmit !== false} onChange=${e => setEditingItem({ ...editingItem, allowReviewAfterSubmit: e.target.checked })} className="w-5 h-5 accent-brand-DEFAULT rounded" />
+                                                                        <span className="text-sm font-bold">السماح بمراجعة الأسئلة بعد التسليم</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     `}
                                                 </div>
+                                            </div>
 
-                                                <!-- Card 3: ضوابط الدخول والوصول -->
-                                                <div className="bg-slate-800/50 dark:bg-slate-900/50 border border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
-                                                    <h4 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><span className="text-brand-DEFAULT">🛡️</span> ضوابط الدخول والوصول</h4>
+                                            <!-- كارت 5 — الوقت والدخول -->
+                                            <div key="card-5-time" className="col-span-2 bg-white/80 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-xl">
+                                                <h4 className="text-xl font-black text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+                                                    <span className="text-brand-DEFAULT text-2xl">⏳</span> الوقت والدخول
+                                                </h4>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                    <div className="col-span-1">
+                                                        <label className="block text-sm font-black mb-3 text-gray-700 dark:text-gray-300">وقت البدء</label>
+                                                        <input type="datetime-local" value=${editingItem.startTime || ''} onChange=${e => setEditingItem({ ...editingItem, startTime: e.target.value })} className="w-full p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
+                                                    </div>
+                                                    <div className="col-span-1">
+                                                        <label className="block text-sm font-black mb-3 text-gray-700 dark:text-gray-300">وقت الانتهاء</label>
+                                                        <input type="datetime-local" value=${editingItem.endTime || ''} onChange=${e => setEditingItem({ ...editingItem, endTime: e.target.value })} className="w-full p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
+                                                    </div>
+                                                    <div className="col-span-2">
+                                                        <label className="block text-sm font-black mb-3 text-gray-700 dark:text-gray-300">سياسة التأخير</label>
+                                                        <select value=${editingItem.latePolicy || 'hard_stop'} onChange=${e => setEditingItem({ ...editingItem, latePolicy: e.target.value })} className="w-full p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-white font-bold outline-none focus:border-brand-DEFAULT transition-all">
+                                                            <option value="hard_stop">منع التسليم</option>
+                                                            <option value="grace_period">تحديد كمتأخر</option>
+                                                        </select>
+                                                    </div>
                                                     
-                                                    <div className="space-y-6">
-                                                        <div className="p-4 bg-slate-800 dark:bg-slate-900 rounded-xl border border-slate-600">
-                                                            <div className="flex items-center gap-3">
-                                                                <input type="checkbox" checked=${editingItem.allowBackNavigation !== undefined ? editingItem.allowBackNavigation : true} onChange=${e => setEditingItem({ ...editingItem, allowBackNavigation: e.target.checked })} className="w-6 h-6 accent-brand-DEFAULT rounded" />
-                                                                <label className="text-sm font-black text-white cursor-pointer" onClick=${() => setEditingItem({ ...editingItem, allowBackNavigation: !(editingItem.allowBackNavigation !== undefined ? editingItem.allowBackNavigation : true) })}>السماح بالرجوع للسؤال السابق</label>
-                                                            </div>
+                                                    <div className="col-span-2 p-5 bg-white dark:bg-slate-900 rounded-xl border border-brand-DEFAULT/30">
+                                                        <label className="block text-sm font-black mb-4 text-brand-DEFAULT">حقول بوابة الدخول الإلزامية</label>
+                                                        <div className="flex flex-col sm:flex-row gap-6">
+                                                            <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-700 dark:text-gray-300">الاسم</span></label>
+                                                            <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-700 dark:text-gray-300">الشعبة</span></label>
+                                                            <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-700 dark:text-gray-300">البريد الإلكتروني</span></label>
                                                         </div>
+                                                        <p className="text-xs text-brand-DEFAULT/60 mt-4 font-bold">هذه الحقول إجبارية ويتم تطبيقها تلقائياً عند التسجيل.</p>
+                                                    </div>
 
-                                                        <div className="p-4 bg-slate-800 dark:bg-slate-900 rounded-xl border border-slate-600">
-                                                            <div className="flex items-center gap-3">
-                                                                <input type="checkbox" checked=${editingItem.sendDetailedReport !== undefined ? editingItem.sendDetailedReport : false} onChange=${e => setEditingItem({ ...editingItem, sendDetailedReport: e.target.checked })} className="w-6 h-6 accent-brand-DEFAULT rounded" />
-                                                                <label className="text-sm font-black text-white cursor-pointer" onClick=${() => setEditingItem({ ...editingItem, sendDetailedReport: !(editingItem.sendDetailedReport !== undefined ? editingItem.sendDetailedReport : false) })}>إرسال تقرير مفصل للطالب عبر البريد</label>
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="p-5 bg-slate-800 dark:bg-slate-900 rounded-xl border border-brand-DEFAULT/30">
-                                                            <label className="block text-sm font-black mb-4 text-brand-DEFAULT">حقول بوابة الدخول الإلزامية</label>
-                                                            <div className="flex flex-col sm:flex-row gap-6">
-                                                                <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-300">الاسم</span></label>
-                                                                <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-300">الشعبة</span></label>
-                                                                <label className="flex items-center gap-3"><input type="checkbox" checked disabled className="w-6 h-6 accent-brand-DEFAULT rounded opacity-50" /> <span className="font-bold text-gray-300">البريد الإلكتروني</span></label>
-                                                            </div>
-                                                            <p className="text-xs text-brand-DEFAULT/60 mt-4 font-bold">هذه الحقول إجبارية ويتم تطبيقها تلقائياً عند التسجيل.</p>
-                                                        </div>
-
-                                                        ${editingItem.examMode === 'evaluation' && html`
-                                                            <div className="pt-4 border-t border-slate-700">
-                                                                <div className="flex justify-between items-center mb-4">
-                                                                    <label className="block text-sm font-black text-white">إيميلات الإدارة</label>
-                                                                    <button onClick=${() => {
-                            const arr = (editingItem.adminEmails || '').split(',').filter(Boolean);
-                            arr.push('');
-                            setEditingItem({ ...editingItem, adminEmails: arr.join(',') });
-                        }} className="px-5 py-2 bg-gradient-to-r from-brand-DEFAULT to-brand-hover text-white text-sm rounded-full font-bold shadow-lg hover:shadow-brand-DEFAULT/50 transition-all">+ إضافة إيميل</button>
-                                                                </div>
-                                                                <div className="space-y-3">
-                                                                    ${((editingItem.adminEmails || '').split(',').length === 0 ? [''] : (editingItem.adminEmails || '').split(',')).map((em, idx, arr) => html`
-                                                                        <div key=${idx} className="flex gap-3 items-center">
-                                                                            <input type="email" value=${em} placeholder="admin@example.com" onChange=${e => {
-                                const newArr = [...arr];
-                                newArr[idx] = e.target.value;
-                                setEditingItem({ ...editingItem, adminEmails: newArr.join(',') });
-                            }} className="flex-1 p-4 rounded-xl bg-slate-800 border border-slate-600 text-white font-bold outline-none focus:border-brand-DEFAULT transition-all" />
-                                                                            ${arr.length > 1 && html`
-                                                                                <button onClick=${() => {
-                                    const newArr = arr.filter((_, i) => i !== idx);
-                                    setEditingItem({ ...editingItem, adminEmails: newArr.join(',') });
-                                }} className="p-4 text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-xl transition-all shadow-sm"><${Luminova.Icons.Trash} /></button>
-                                                                            `}
-                                                                        </div>
-                                                                    `)}
-                                                                </div>
-                                                            </div>
-                                                        `}
+                                                    <div className="col-span-2">
+                                                        <p className="text-sm text-brand-gold font-bold bg-brand-gold/10 p-4 rounded-xl border border-brand-gold/20 flex items-center gap-3">
+                                                            <span className="text-xl">⚠️</span> يتم حساب الوقت بدقة بناءً على توقيت القاهرة الفعلي (عبر الإنترنت) متجاهلاً إعدادات جهاز الطالب.
+                                                        </p>
                                                     </div>
                                                 </div>
-
                                             </div>
-                                        </div>
+                                        `}
                                     ` : html`
-                                        <div className="w-full"><${Luminova.Components.Input} label="الاسم العربي" val=${editingItem.nameAr} onChange=${v => setEditingItem({ ...editingItem, nameAr: v })} /></div> <div className="w-full"><${Luminova.Components.Input} label="English Name" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div>
+                                        <div key="default-name-ar-container" className="w-full"><${Luminova.Components.Input} label="الاسم العربي" val=${editingItem.nameAr} onChange=${v => setEditingItem({ ...editingItem, nameAr: v })} /></div>
+                                        <div key="default-name-en-container" className="w-full"><${Luminova.Components.Input} label="الاسم بلغة أخرى" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div>
                                     `}
                                 </div>
 
@@ -2515,8 +3473,8 @@
                                         onClick=${handleAutoTranslate}
                                         disabled=${isTranslating}
                                         className="w-full md:w-auto px-6 py-4 rounded-2xl font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500 hover:text-white transition-all shadow-sm flex items-center justify-center gap-2 border border-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
-                                        ${isTranslating ? html`<span className="animate-spin">🔄</span>` : '🪄'}
-                                        ${lang === 'ar' ? 'ترجمة تلقائية للإنجليزية' : 'Auto-Translate to English'}
+                                        ${isTranslating ? html`<span key="translating-spinner" className="animate-spin">🔄</span>` : '🪄'}
+                                        ${lang === 'ar' ? 'ترجمة تلقائية للغة الأخرى' : 'ترجمة تلقائية للغة الأخرى'}
                                     </button>
                                     <${Luminova.Components.Button} variant="glass" onClick=${() => setEditingItem(null)} className="w-full md:w-[20%] text-xl py-4 rounded-2xl">${Luminova.i18n[lang].cancel}</${Luminova.Components.Button}>
                                 </div>
@@ -2525,9 +3483,9 @@
                             <div key="merger-tab-container" className="p-4 sm:p-8 animate-fade-in">
                                 <div className="mb-10 text-center">
                                     <h4 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-brand-DEFAULT to-brand-gold mb-2">
-                                        ${lang === 'ar' ? 'دمج الملفات الذكي' : 'Smart Data Merger'}
+                                        ${lang === 'ar' ? 'دمج الملفات الذكي' : 'دمج الملفات الذكي'}
                                     </h4>
-                                    <p className="opacity-60 font-bold">${lang === 'ar' ? 'قم بدمج وتحديث البيانات من ملفات الفريق الخارجية مع النسخة الحية على GitHub' : 'Merge and update data from team files with the live version on GitHub'}</p>
+                                    <p className="opacity-60 font-bold">${lang === 'ar' ? 'قم بدمج وتحديث البيانات من ملفات الفريق الخارجية مع النسخة الحية على جت هب' : 'قم بدمج وتحديث البيانات من ملفات الفريق الخارجية مع النسخة الحية على جت هب'}</p>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -2536,30 +3494,30 @@
                                         <${Luminova.Components.GlassCard} className="p-6 border-brand-DEFAULT/20 shadow-lg">
                                             <h5 className="font-black text-lg mb-4 flex items-center gap-2">
                                                 <span className="w-8 h-8 rounded-full bg-brand-DEFAULT/20 flex items-center justify-center text-brand-DEFAULT text-sm">1</span>
-                                                ${lang === 'ar' ? 'تحديد نوع الملف الهدف' : 'Select Target File Type'}
+                                                ${lang === 'ar' ? 'تحديد نوع الملف الهدف' : 'تحديد نوع الملف الهدف'}
                                             </h5>
                                             <div className="grid grid-cols-3 gap-3 mb-6">
                                                 ${['data', 'exams', 'certs'].map(t => html`
-                                                    <button onClick=${() => { setMergerTarget(t); setMergerBase(null); setMergerLocal(null); setMergerStatus({ state: 'idle', msg: '' }); }}
+                                                    <button key=${t} onClick=${() => { setMergerTarget(t); setMergerBase(null); setMergerLocal(null); setMergerStatus({ state: 'idle', msg: '' }); }}
                                                         className=${`p-4 rounded-xl border-2 font-black transition-all ${mergerTarget === t ? 'border-brand-DEFAULT bg-brand-DEFAULT/5 text-brand-DEFAULT shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'border-gray-200 dark:border-gray-700 opacity-60'}`}>
                                                         <div className="text-xl mb-1">${t === 'data' ? '📊' : t === 'exams' ? '📝' : '📜'}</div>
-                                                        <div className="text-xs uppercase">${t}</div>
+                                                        <div className="text-xs uppercase">${t === 'data' ? 'البيانات' : t === 'exams' ? 'الاختبارات' : 'الشهادات'}</div>
                                                     </button>
                                                 `)}
                                             </div>
                                             <${Luminova.Components.Button} onClick=${handleFetchBase} disabled=${mergerStatus.state === 'loading'} className="w-full py-4 rounded-2xl shadow-xl shadow-brand-DEFAULT/20">
                                                 ${mergerStatus.state === 'loading' ? html`<span className="animate-spin mr-2">🔄</span>` : '⬇️'}
-                                                ${lang === 'ar' ? 'سحب النسخة الحية من GitHub' : 'Fetch Live GitHub Version'}
+                                                ${lang === 'ar' ? 'سحب النسخة الحية من جت هب' : 'سحب النسخة الحية من جت هب'}
                                             </${Luminova.Components.Button}>
                                         </${Luminova.Components.GlassCard}>
 
                                         ${mergerBase && html`
-                                            <${Luminova.Components.GlassCard} className="p-6 border-green-500/20 bg-green-500/5 animate-slide-up">
+                                            <${Luminova.Components.GlassCard} key="merger-base-ready" className="p-6 border-green-500/20 bg-green-500/5 animate-slide-up">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center text-green-500">✓</div>
                                                     <div>
-                                                        <div className="font-black text-green-600 dark:text-green-400">${lang === 'ar' ? 'تم جلب البيانات بنجاح' : 'Base Data Ready'}</div>
-                                                        <div className="text-xs opacity-60 font-bold uppercase tracking-widest">${mergerTarget}.js source loaded</div>
+                                                        <div className="font-black text-green-600 dark:text-green-400">${lang === 'ar' ? 'تم جلب البيانات بنجاح' : 'تم جلب البيانات بنجاح'}</div>
+                                                        <div className="text-xs opacity-60 font-bold uppercase tracking-widest">تم تحميل مصدر ${mergerTarget}.js</div>
                                                     </div>
                                                 </div>
                                             </${Luminova.Components.GlassCard}>
@@ -2571,39 +3529,39 @@
                                         <${Luminova.Components.GlassCard} className="p-6 border-brand-gold/20 shadow-lg">
                                             <h5 className="font-black text-lg mb-4 flex items-center gap-2">
                                                 <span className="w-8 h-8 rounded-full bg-brand-gold/20 flex items-center justify-center text-brand-gold text-sm">2</span>
-                                                ${lang === 'ar' ? 'رفع الملف الجديد للمزامنة' : 'Upload Local File to Sync'}
+                                                ${lang === 'ar' ? 'رفع الملف الجديد للمزامنة' : 'رفع الملف الجديد للمزامنة'}
                                             </h5>
                                             
                                             <div onDragOver=${e => e.preventDefault()} onDrop=${handleFileDrop} className="relative group">
                                                 <input type="file" onChange=${handleFileDrop} className="absolute inset-0 opacity-0 cursor-pointer z-10" accept=".js,.json" />
                                                 <div className="border-4 border-dashed border-gray-200 dark:border-gray-800 rounded-3xl p-10 text-center transition-all group-hover:border-brand-gold/50 group-hover:bg-brand-gold/5">
                                                     <div className="text-4xl mb-4 group-hover:scale-110 transition-transform">📂</div>
-                                                    <div className="font-black opacity-60">${lang === 'ar' ? 'اسحب الملف هنا أو اضغط للاختيار' : 'Drag & Drop file or click to browse'}</div>
-                                                    <div className="text-xs mt-2 text-brand-gold font-bold">.js and .json files accepted</div>
+                                                    <div className="font-black opacity-60">${lang === 'ar' ? 'اسحب الملف هنا أو اضغط للاختيار' : 'اسحب الملف هنا أو اضغط للاختيار'}</div>
+                                                    <div className="text-xs mt-2 text-brand-gold font-bold">تُقبل ملفات .js و .json</div>
                                                 </div>
                                             </div>
 
                                             ${mergerLocal && html`
-                                                <div className="mt-6 p-4 rounded-xl bg-brand-gold/10 border border-brand-gold/20 animate-bounce-subtle">
+                                                <div key="merger-local-recognized" className="mt-6 p-4 rounded-xl bg-brand-gold/10 border border-brand-gold/20 animate-bounce-subtle">
                                                     <div className="font-black text-brand-gold flex items-center gap-2">
-                                                        <span>✨</span> ${lang === 'ar' ? 'تم التعرف على الملف المحلي' : 'Local File Recognized'}
+                                                        <span>✨</span> ${lang === 'ar' ? 'تم التعرف على الملف المحلي' : 'تم التعرف على الملف المحلي'}
                                                     </div>
                                                 </div>
                                             `}
 
                                             <div className="mt-8 flex gap-4">
                                                 <${Luminova.Components.Button} onClick=${handleExecuteMerge} disabled=${!mergerBase || !mergerLocal} className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-brand-DEFAULT to-brand-hover shadow-xl shadow-brand-DEFAULT/30 disabled:opacity-30 disabled:grayscale">
-                                                    🚀 ${lang === 'ar' ? 'بدء الدمج الذكي' : 'Execute Smart Merge'}
+                                                    🚀 ${lang === 'ar' ? 'بدء الدمج الذكي' : 'بدء الدمج الذكي'}
                                                 </${Luminova.Components.Button}>
                                             </div>
                                         </${Luminova.Components.GlassCard}>
 
                                         ${mergerStatus.state === 'merged' && html`
-                                            <${Luminova.Components.GlassCard} className="p-6 border-brand-gold/30 bg-brand-gold/5 animate-slide-up">
-                                                <h5 className="font-black text-brand-gold mb-3 flex items-center gap-2">📊 ${lang === 'ar' ? 'نتائج الدمج' : 'Merge Summary'}</h5>
+                                            <${Luminova.Components.GlassCard} key="merger-success-card" className="p-6 border-brand-gold/30 bg-brand-gold/5 animate-slide-up">
+                                                <h5 className="font-black text-brand-gold mb-3 flex items-center gap-2">📊 ${lang === 'ar' ? 'نتائج الدمج' : 'نتائج الدمج'}</h5>
                                                 <p className="text-sm font-bold opacity-80 mb-6 leading-relaxed">${mergerStatus.msg}</p>
                                                 <${Luminova.Components.Button} onClick=${handleDownloadMerged} className="w-full py-4 rounded-2xl bg-brand-gold text-black font-black shadow-[0_0_20px_rgba(251,191,36,0.3)] hover:shadow-[0_0_35px_rgba(251,191,36,0.5)] transition-all">
-                                                    ✨ ${lang === 'ar' ? 'تحميل الملف النهائي المدمج' : 'Download Final Merged File'}
+                                                    ✨ ${lang === 'ar' ? 'تحميل الملف النهائي المدمج' : 'تحميل الملف النهائي المدمج'}
                                                 </${Luminova.Components.Button}>
                                             </${Luminova.Components.GlassCard}>
                                         `}
@@ -2611,7 +3569,7 @@
                                 </div>
 
                                 ${mergerStatus.state === 'error' && html`
-                                    <div className="mt-8 p-6 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 font-black text-center animate-shake">
+                                    <div key="merger-error-alert" className="mt-8 p-6 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 font-black text-center animate-shake">
                                         ❌ ${mergerStatus.msg}
                                     </div>
                                 `}
@@ -2641,31 +3599,36 @@
                                             </div>
                                             
                                             <div className="font-black text-lg sm:text-xl text-gray-900 dark:text-white leading-tight mb-2">
-                                                ${item.titleAr || item.nameAr || item.name || item.titleEn || item.nameEn || item.title || 'N/A'}
+                                                ${item.titleAr || item.nameAr || item.name || item.titleEn || item.nameEn || item.title || 'غير متاح'}
                                                 ${item.isVIP && html`<span key="vip" className="ms-2 text-brand-DEFAULT animate-pulse">✨</span>`}
                                                 ${item.isFeatured && html`<span key="featured" className="ms-2 text-brand-gold">📌</span>`}
                                                 ${item.isVerified && html`<span key="verified" className="ms-2 text-blue-500">🔵✔️</span>`}
                                                 ${item.role === 'doctor' && html`<span key="doctor" className="ms-2 text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full font-black">🎓</span>`}
                                             </div>
+                                            ${activeTab === 'quizzes' && item.examMode === 'evaluation' && (() => {
+                                                const controlExam = normalizeExamForControl(item, { settings: data.settings || {} });
+                                                const badge = getSubmissionStatusBadge(controlExam.submissionStatus);
+                                                return html`<div key="exam-delivery-status-badge" className=${`inline-flex px-3 py-1 rounded-full border text-xs font-black ${badge.cls}`}>${badge.label}</div>`;
+                                            })()}
 
                                             ${activeTab === 'certificates' && html`
-                                                <div className="flex flex-wrap items-center gap-3 mt-2 mb-1">
+                                                <div key="cert-meta-details" className="flex flex-wrap items-center gap-3 mt-2 mb-1">
                                                     <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm text-sm font-bold text-gray-700 dark:text-gray-200">
                                                         <span className="opacity-60 text-lg">🎓</span>
-                                                        <span>${lang === 'ar' ? 'الطالب:' : 'Student:'}</span>
+                                                        <span>${lang === 'ar' ? 'الطالب:' : 'الطالب:'}</span>
                                                         <span className="text-brand-DEFAULT">${item.studentName || item.studentNameEn}</span>
                                                     </div>
                                                     <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm text-sm font-bold">
                                                         <span className="opacity-60 text-lg">🏆</span>
                                                         <span className="text-gray-700 dark:text-gray-200">${lang === 'ar' ? 'الدرجة:' : 'Level:'}</span>
-                                                        ${item.level === 'gold' ? html`<span className="text-brand-gold drop-shadow-sm">ذهبية 🏅</span>` : item.level === 'silver' ? html`<span className="text-gray-400 drop-shadow-sm">فضية 🥈</span>` : html`<span className="text-gray-500 drop-shadow-sm">عادية 📜</span>`}
+                                                        ${item.level === 'gold' ? html`<span key="level-gold" className="text-brand-gold drop-shadow-sm">ذهبية 🏅</span>` : item.level === 'silver' ? html`<span key="level-silver" className="text-gray-400 drop-shadow-sm">فضية 🥈</span>` : html`<span key="level-standard" className="text-gray-500 drop-shadow-sm">عادية 📜</span>`}
                                                     </div>
                                                 </div>
                                             `}
 
                                             <div className="flex flex-wrap gap-2 mt-3">
                                                 ${subjectYear && subjectSemester && html`
-                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
+                                                    <div key="sub-year-sem-badge" className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
                                                         <span className="opacity-60">${lang === 'ar' ? 'الفرقة:' : 'Year:'}</span>
                                                         <span>${subjectYear.nameAr || subjectYear.name}</span>
                                                         <span className="opacity-30 mx-1">|</span>
@@ -2674,20 +3637,20 @@
                                                     </div>
                                                 `}
                                                 ${year && html`
-                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
+                                                    <div key="year-badge" className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
                                                         <span className="opacity-60">${lang === 'ar' ? 'الفرقة:' : 'Year:'}</span>
                                                         <span>${year.nameAr || year.name}</span>
                                                     </div>
                                                 `}
                                                 ${subject && html`
-                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
+                                                    <div key="sub-badge" className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-DEFAULT/10 border border-brand-DEFAULT/20 text-brand-DEFAULT text-xs font-bold">
                                                         <span className="opacity-60">${lang === 'ar' ? 'المادة:' : 'Subject:'}</span>
                                                         <span>${subject.nameAr || subject.name}</span>
                                                     </div>
                                                 `}
                                                 ${author && author.id !== 'unknown' && html`
-                                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-gold/10 border border-brand-gold/20 text-brand-gold text-xs font-bold">
-                                                        <span className="opacity-60">${lang === 'ar' ? 'الكاتب:' : 'Author:'}</span>
+                                                    <div key="author-badge" className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-gold/10 border border-brand-gold/20 text-brand-gold text-xs font-bold">
+                                                        <span className="opacity-60">${lang === 'ar' ? 'الكاتب:' : 'الكاتب:'}</span>
                                                         <span>${author.nameAr || author.name}</span>
                                                     </div>
                                                 `}
@@ -2701,20 +3664,20 @@
                                                     <span className="bg-indigo-500/20 px-2 py-0.5 rounded-full text-[10px]">${(item.questions || []).length}</span>
                                                 </button>
                                             `}
-                                            <button onClick=${() => setEditingItem({ ...item })} className="p-3 bg-brand-DEFAULT/10 text-brand-DEFAULT rounded-xl hover:bg-brand-DEFAULT hover:text-white hover:shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-all border border-brand-DEFAULT/20" title="Edit"><${Luminova.Icons.Edit} /></button>
-                                            <button onClick=${() => handleDelete(activeTab, item.id)} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white hover:shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all border border-red-500/20" title="Delete"><${Luminova.Icons.Trash} /></button>
+                                            <button key="edit-btn" onClick=${() => setEditingItem({ ...item })} className="p-3 bg-brand-DEFAULT/10 text-brand-DEFAULT rounded-xl hover:bg-brand-DEFAULT hover:text-white hover:shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-all border border-brand-DEFAULT/20" title="Edit"><${Luminova.Icons.Edit} /></button>
+                                            <button key="delete-btn" onClick=${() => handleDelete(activeTab, item.id)} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white hover:shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all border border-red-500/20" title="Delete"><${Luminova.Icons.Trash} /></button>
                                         </div>
                                     </div>
                                     `})}
                                 ${activeTableItems.length === 0 && html`
-                                    <div className="p-12 sm:p-20 text-center font-bold text-xl sm:text-2xl opacity-30 border-2 border-dashed rounded-3xl">${Luminova.i18n[lang].emptyState}</div>
+                                    <div key="empty-state-container" className="p-12 sm:p-20 text-center font-bold text-xl sm:text-2xl opacity-30 border-2 border-dashed rounded-3xl">${Luminova.i18n[lang].emptyState}</div>
                                 `}
                             </div>
                             
                             ${(!editingItem && cmsVisibleCount < activeTableItems.length) && html`
-                                <div className="flex justify-center pt-6 pb-2">
+                                <div key="show-more-btn-container" className="flex justify-center pt-6 pb-2">
                                     <button onClick=${() => setCmsVisibleCount(prev => prev + 5)} className="bg-brand-DEFAULT hover:bg-brand-hover text-white font-bold py-2.5 px-8 rounded-xl shadow-md transition-all">
-                                        ${lang === 'ar' ? 'عرض المزيد ➕' : 'Load More ➕'}
+                                        ${lang === 'ar' ? 'عرض المزيد ➕' : 'عرض المزيد ➕'}
                                     </button>
                                 </div>
                             `}
@@ -2731,7 +3694,7 @@
 
 
     // ==========================================
-    // NANO BANANA CMS APPLICATION (DUAL-ACCESS)
+    // تطبيق لوحة الإدارة
     // ==========================================
 
     const CMSApp = () => {
@@ -2740,19 +3703,26 @@
 
         // We fetch data immediately
         const [dataReady, setDataReady] = useState(false);
-        const [loadingMsg, setLoadingMsg] = useState('Initializing Application... Please wait');
+        const [loadingMsg, setLoadingMsg] = useState('جاري تهيئة التطبيق... برجاء الانتظار');
         const [data, setData] = useState(null);
 
         useEffect(() => {
             const fetchInitialData = async () => {
-                setLoadingMsg('Fetching Data... Please wait');
+                setLoadingMsg('جاري تحميل البيانات... برجاء الانتظار');
                 try {
                     const fetchAndLoad = async (url, fallbackScript) => {
                         const target = fallbackScript === 'data.js' ? 'data' : fallbackScript === 'exam.js' ? 'exams' : 'certs';
+                        
+                        if (target === 'exams') {
+                            window.LUMINOVA_EXAMS = undefined;
+                            window.__LUMINOVA_EXAMS__ = undefined;
+                            window.__LUMINOVA_EXAM_PACK__ = undefined;
+                        }
+
                         if (url && url !== "PASTE_YOUR_DATA_URL_HERE" && url !== "PASTE_YOUR_EXAM_URL_HERE" && url !== "PASTE_YOUR_CERTS_URL_HERE") {
                             try {
                                 const res = await fetch(url + '?t=' + new Date().getTime());
-                                if (!res.ok) throw new Error('Fetch failed');
+                                if (!res.ok) throw new Error('فشل جلب الملف');
                                 const text = await res.text();
                                 assignLuminovaPayload(target, parseLuminovaPayload(text, target));
                                 return true;
@@ -2765,7 +3735,20 @@
                         return new Promise((resolve) => {
                             const script = document.createElement('script');
                             script.src = '../' + fallbackScript + '?v=' + Date.now();
-                            script.onload = () => resolve(true);
+                            script.onload = () => {
+                                if (target === 'exams') {
+                                    if (window.__LUMINOVA_EXAM_PACK__) {
+                                        try {
+                                            window.LUMINOVA_EXAMS = decodeLxp2ExamPackForCms(window.__LUMINOVA_EXAM_PACK__);
+                                        } catch (e) {
+                                            console.error("Failed to decode LXP2 fallback pack:", e);
+                                        }
+                                    } else if (window.__LUMINOVA_EXAMS__) {
+                                        window.LUMINOVA_EXAMS = window.__LUMINOVA_EXAMS__;
+                                    }
+                                }
+                                resolve(true);
+                            };
                             script.onerror = () => resolve(false);
                             document.body.appendChild(script);
                         });
@@ -2786,12 +3769,12 @@
                             setDataReady(true);
                             setLoadingMsg('');
                         } else {
-                            setLoadingMsg('Failed to load data.js (Check path or URL)');
+                            setLoadingMsg('فشل تحميل data.js. تحقق من المسار أو الرابط');
                         }
                     }, 500);
 
                 } catch (e) {
-                    setLoadingMsg('Critical Error Loading Data: ' + e.message);
+                    setLoadingMsg('خطأ حرج أثناء تحميل البيانات: ' + e.message);
                 }
             };
             fetchInitialData();
@@ -2810,26 +3793,26 @@
                 window.CMS_EDITOR_ADDED_IDS = [];
                 setLoginState({ loggedIn: true, role: 'editor' });
             } else {
-                setAuthError('Invalid credentials');
+                setAuthError('بيانات الدخول غير صحيحة');
             }
         };
 
         if (loadingMsg) {
             return html`
-            <div key="loading-screen" className="min-h-screen flex items-center justify-center flex-col gap-6 bg-slate-950 text-white relative overflow-hidden">
+            <div key="loading-screen" className="min-h-screen flex items-center justify-center flex-col gap-6 bg-slate-50 dark:bg-slate-950 text-gray-900 dark:text-white relative overflow-hidden">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(6,182,212,0.15),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(251,191,36,0.1),transparent_50%)]"></div>
                 <div className="relative">
                     <div className="w-20 h-20 border-4 border-brand-DEFAULT/30 border-t-brand-DEFAULT rounded-full animate-spin"></div>
                     <div className="absolute inset-0 w-20 h-20 border-4 border-transparent border-b-brand-gold/50 rounded-full animate-spin" style=${{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
                 </div>
-                <p className="font-bold text-lg text-gray-300 tracking-wide">${loadingMsg}</p>
+                <p className="font-bold text-lg text-gray-700 dark:text-gray-300 tracking-wide">${loadingMsg}</p>
             </div>
         `;
         }
 
         if (!loginState.loggedIn) {
             return html`
-            <div key="login-screen" className="min-h-screen flex items-center justify-center bg-slate-950 text-white relative overflow-hidden px-4">
+            <div key="login-screen" className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-gray-900 dark:text-white relative overflow-hidden px-4">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(6,182,212,0.2),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(251,191,36,0.12),transparent_50%)]"></div>
                 <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-brand-DEFAULT/5 rounded-full blur-3xl animate-pulse"></div>
                 <div className="absolute bottom-1/4 right-1/4 w-72 h-72 bg-brand-gold/5 rounded-full blur-3xl animate-pulse" style=${{ animationDelay: '1s' }}></div>
@@ -2838,31 +3821,31 @@
                     <div className="bg-white/[0.03] backdrop-blur-2xl rounded-3xl border border-white/[0.08] shadow-2xl shadow-black/40 p-8 sm:p-10">
                         <div className="text-center mb-10">
                             <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-brand-DEFAULT to-brand-gold flex items-center justify-center shadow-lg shadow-brand-DEFAULT/30">
-                                <span className="text-3xl font-black text-white drop-shadow-md">L</span>
+                                <span className="text-3xl font-black text-gray-900 dark:text-white drop-shadow-md">L</span>
                             </div>
-                            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-white">LUMINOVA CMS</h1>
+                            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-gray-900 dark:text-white">لوحة إدارة لومينوفا</h1>
                             <div className="w-16 h-1 mx-auto mt-3 bg-gradient-to-r from-brand-DEFAULT to-brand-gold rounded-full"></div>
                         </div>
                         <form onSubmit=${handleLogin} className="space-y-5">
                             <div className="relative">
                                 <span className="absolute inset-y-0 start-4 flex items-center text-gray-500 pointer-events-none">👤</span>
-                                <input name="username" type="text" placeholder="Username" className="w-full ps-12 pe-4 py-4 rounded-xl bg-white/[0.04] border border-white/[0.08] outline-none focus:border-brand-DEFAULT/60 focus:bg-white/[0.06] focus:shadow-[0_0_20px_rgba(6,182,212,0.15)] font-bold transition-all text-white placeholder:text-gray-600" required />
+                                <input name="username" type="text" placeholder="اسم المستخدم" className="w-full ps-12 pe-4 py-4 rounded-xl bg-gray-100 dark:bg-white/[0.04] border border-gray-300 dark:border-white/[0.08] outline-none focus:border-brand-DEFAULT/60 focus:bg-white focus:shadow-[0_0_20px_rgba(6,182,212,0.15)] font-bold transition-all text-gray-900 dark:text-white placeholder:text-gray-500" required />
                             </div>
                             <div className="relative">
                                 <span className="absolute inset-y-0 start-4 flex items-center text-gray-500 pointer-events-none">🔑</span>
-                                <input name="password" type="password" placeholder="Password" className="w-full ps-12 pe-4 py-4 rounded-xl bg-white/[0.04] border border-white/[0.08] outline-none focus:border-brand-DEFAULT/60 focus:bg-white/[0.06] focus:shadow-[0_0_20px_rgba(6,182,212,0.15)] font-bold transition-all text-white placeholder:text-gray-600" required />
+                                <input name="password" type="password" placeholder="كلمة المرور" className="w-full ps-12 pe-4 py-4 rounded-xl bg-gray-100 dark:bg-white/[0.04] border border-gray-300 dark:border-white/[0.08] outline-none focus:border-brand-DEFAULT/60 focus:bg-white focus:shadow-[0_0_20px_rgba(6,182,212,0.15)] font-bold transition-all text-gray-900 dark:text-white placeholder:text-gray-500" required />
                             </div>
                             ${authError && html`<div className="text-red-400 font-bold text-center text-sm bg-red-500/10 border border-red-500/20 p-3 rounded-xl">${authError}</div>`}
                             <button type="submit" className="w-full relative overflow-hidden bg-gradient-to-r from-brand-DEFAULT to-cyan-500 text-white font-black py-4 rounded-xl shadow-lg transition-all hover:shadow-[0_0_30px_rgba(6,182,212,0.5)] hover:scale-[1.02] active:scale-95 group">
                                 <span className="relative z-10 flex items-center justify-center gap-2 text-lg">
-                                    SECURE LOGIN
+                                    دخول آمن
                                     <span className="group-hover:translate-x-1 transition-transform">➔</span>
                                 </span>
                                 <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-brand-DEFAULT opacity-0 group-hover:opacity-100 transition-opacity"></div>
                             </button>
                         </form>
                     </div>
-                    <p className="text-center text-gray-600 text-xs mt-6 font-bold tracking-widest">LUMINOVA EDUCATION PLATFORM</p>
+                    <p className="text-center text-gray-600 text-xs mt-6 font-bold tracking-widest">منصة لومينوفا التعليمية</p>
                 </div>
             </div>
         `;
@@ -2873,9 +3856,9 @@
         <div key="admin-cms-main" className="min-h-screen relative bg-slate-50 dark:bg-slate-950">
             <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,rgba(6,182,212,0.04),transparent_50%)] pointer-events-none z-0"></div>
             ${loginState.role === 'editor' && html`
-                <div key="editor-mode-badge" className="fixed bottom-4 start-4 z-50 flex items-center gap-2 bg-amber-500/90 backdrop-blur-xl text-black px-4 py-2 rounded-full shadow-lg shadow-amber-500/20 font-black text-xs sm:text-sm cursor-default group" title="Blind Addition Mode: You can only add new items. Existing data is hidden.">
+                <div key="editor-mode-badge" className="fixed bottom-4 start-4 z-50 flex items-center gap-2 bg-amber-500/90 backdrop-blur-xl text-black px-4 py-2 rounded-full shadow-lg shadow-amber-500/20 font-black text-xs sm:text-sm cursor-default group" title="وضع الإضافة فقط: يمكنك إضافة عناصر جديدة فقط، والبيانات الحالية مخفية.">
                     <span className="text-lg">👁️‍🗨️</span>
-                    <span className="hidden sm:inline">EDITOR MODE</span>
+                    <span className="hidden sm:inline">وضع المحرر</span>
                     <span className="w-2 h-2 bg-black/30 rounded-full animate-pulse"></span>
                 </div>
             `}
@@ -2889,3 +3872,4 @@
     const root = window.ReactDOM.createRoot(document.getElementById('cms-root'));
     root.render(html`<${CMSApp} />`);
 })();
+

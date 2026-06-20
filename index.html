@@ -4,17 +4,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Luminova-Edu CMS</title>
+    <title>لوحة إدارة لومينوفا التعليمية</title>
 
-    <!-- Cache Busting Strategy -->
+    <!-- سياسة منع التخزين المؤقت -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <!-- Fonts -->
+    <!-- الخطوط -->
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
-    <!-- Favicon -->
+    <!-- أيقونة الموقع -->
     <link rel="icon" href="data:;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2NVVFT/z0AEYGZmYmD4Ty6AqcH/Z2D4TyyAqcH/Z2D4TyyAqcH/Z2D4TywAAIeO/pXbXlAAAAAASUVORK5CYII=">
 
 
-    <!-- Tailwind CSS (CDN for zero-build static) -->
+    <!-- تنسيقات الواجهة -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -41,14 +41,14 @@
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 
-    <!-- React and ReactDOM -->
+    <!-- مكتبات التشغيل -->
     <script src="./libs/react.development.js"></script>
     <script src="./libs/react-dom.development.js"></script>
 
-    <!-- HTM (Hyperscript Tagged Markup) -->
+    <!-- مكتبة القوالب -->
     <script src="./libs/htm.umd.js"></script>
 
-    <!-- Base Luminova Object -->
+    <!-- كائن لومينوفا الأساسي -->
     <script>
         window.__LUMINOVA = {
             Pages: {},
@@ -68,15 +68,15 @@
                     settings: 'الإعدادات',
                 },
                 en: {
-                    news: 'News & Updates',
-                    years: 'Academic Years',
-                    semesters: 'Semesters',
-                    subjects: 'Subjects',
-                    students: 'Students Base',
-                    summaries: 'Summaries & Notes',
-                    quizzes: 'Online Quizzes',
-                    certificates: 'Certificates',
-                    settings: 'Settings',
+                    news: 'الأخبار والتحديثات',
+                    years: 'السنوات الدراسية',
+                    semesters: 'الفصول الدراسية',
+                    subjects: 'المواد الدراسية',
+                    students: 'قاعدة الطلاب',
+                    summaries: 'الملخصات والمذكرات',
+                    quizzes: 'الاختبارات الإلكترونية',
+                    certificates: 'الشهادات',
+                    settings: 'الإعدادات',
                 }
             }
         };
@@ -85,8 +85,8 @@
 
 <body class="antialiased min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
     <div id="cms-root"></div>
-    <!-- Load the standalone CMS application logic -->
-    <script src="./cms.js?v=2"></script>
+    <!-- تحميل منطق لوحة الإدارة المستقلة -->
+    <script src="./cms.js?v=8"></script>
 </body>
 
 </html>
