@@ -3,8 +3,14 @@
 
     // --- روابط جت هب الثابتة ---
     const DATA_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/data.js";
-    const EXAM_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/exam.js";
     const CERTS_URL = "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/certificates.js";
+
+    // اشتقاق رابط الاختبارات من روابط البيانات/الشهادات تلقائياً
+    const deriveExamUrl = (dataUrl, certsUrl) => {
+        const referenceUrl = dataUrl || certsUrl || "https://raw.githubusercontent.com/MahmoudAbdo21/Luminova-Edu/main/data.js";
+        return referenceUrl.substring(0, referenceUrl.lastIndexOf('/')) + '/exam.js';
+    };
+    const EXAM_URL = deriveExamUrl(DATA_URL, CERTS_URL);
 
     // ==========================================
     // الجزء 1: أدوات أساسية وترجمة وأيقونات ومكونات
@@ -204,9 +210,47 @@
 
     const stripTrailingSemicolon = (value) => String(value || '').trim().replace(/;\s*$/, '').trim();
 
+    const createExamSourceError = (status, msg, originalError = null) => {
+        const err = new Error(msg);
+        err.status = status;
+        err.originalError = originalError;
+        return err;
+    };
+
+    const extractPackJson = (rawText) => {
+        const assignmentPattern = /(?:window\s*\.\s*)?__LUMINOVA_EXAM_PACK__\s*=\s*/g;
+        const match = assignmentPattern.exec(String(rawText || ""));
+        if (!match) return null;
+
+        const startIdx = rawText.indexOf('{', match.index + match[0].length);
+        if (startIdx === -1) return null;
+
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+
+        for (let i = startIdx; i < rawText.length; i += 1) {
+            const char = rawText[i];
+            if (inString) {
+                if (escape) { escape = false; continue; }
+                if (char === '\\') { escape = true; continue; }
+                if (char === '"') { inString = false; }
+                continue;
+            }
+            if (char === '"') { inString = true; continue; }
+            if (char === '{') { depth += 1; continue; }
+            if (char === '}') {
+                depth -= 1;
+                if (depth === 0) return rawText.slice(startIdx, i + 1);
+                if (depth < 0) return null;
+            }
+        }
+        return null;
+    };
+
     const decodeLxp2ExamPackForCms = (pack) => {
         if (!pack || pack.v !== 2 || pack.alg !== "luminova-lxp-v2") {
-            throw new Error("Invalid Luminova LXP2 exam pack.");
+            throw createExamSourceError("UNSUPPORTED_PACK_VERSION", "نسخة أو خوارزمية ملف الاختبارات غير مدعومة (LXP2 v2).");
         }
 
         const base64UrlToBase64 = (value) => {
@@ -305,29 +349,43 @@
                 showCorrectAnswers: settings.showCorrectAnswers !== undefined ? !!settings.showCorrectAnswers : true,
                 showModelAnswers: settings.showModelAnswers !== undefined ? !!settings.showModelAnswers : true,
                 showExplanations: settings.showExplanations !== undefined ? !!settings.showExplanations : true,
-                allowReviewAfterSubmit: settings.allowReviewAfterSubmit !== undefined ? !!settings.allowReviewAfterSubmit : true
+                allowReviewAfterSubmit: settings.allowReviewAfterSubmit !== undefined ? !!settings.allowReviewAfterSubmit : true,
+                startTime: settings.startTime ?? "",
+                endTime: settings.endTime ?? "",
+                antiCheat: settings.antiCheat && typeof settings.antiCheat === 'object' ? { ...settings.antiCheat } : {},
+                latePolicy: settings.latePolicy ?? "hard_stop"
             };
         };
 
         const chunks = Array.isArray(pack.chunks) ? [...pack.chunks].reverse() : [];
         const payloadBase64 = chunks.join("");
         if (String(payloadBase64.length) !== String(pack.checksum || "")) {
-            throw new Error("Invalid Luminova exam pack checksum.");
+            throw createExamSourceError("CHECKSUM_MISMATCH", "فشل مطابقة الـ Checksum الخاص بملف الاختبارات.");
         }
         const payloadBytes = base64UrlToBytes(payloadBase64);
         const saltBytes = base64UrlToBytes(pack.salt);
         if (!saltBytes.length) {
-            throw new Error("Invalid Luminova exam pack salt.");
+            throw createExamSourceError("INVALID_LXP2_PACK", "ملح التشفير (salt) الخاص بالملف غير صالح.");
         }
         for (let i = 0; i < payloadBytes.length; i++) {
             payloadBytes[i] ^= saltBytes[i % saltBytes.length];
         }
         const json = decodeUtf8(payloadBytes);
-        const payload = JSON.parse(json);
-        if (!Array.isArray(payload) || payload[0] !== "LXP2" || !Array.isArray(payload[1])) {
-            throw new Error("Invalid Luminova exam pack payload.");
+        let payload;
+        try {
+            payload = JSON.parse(json);
+        } catch (e) {
+            throw createExamSourceError("PARSE_ERROR", "فشل في فك تشفير محتوى حزمة LXP2 وتحليله كـ JSON.", e);
         }
-        return payload[1].map(unpackExam);
+        if (!Array.isArray(payload) || payload[0] !== "LXP2" || !Array.isArray(payload[1])) {
+            throw createExamSourceError("INVALID_LXP2_PACK", "تنسيق حزمة LXP2 المصفك غير صالح.");
+        }
+        
+        try {
+            return payload[1].map(unpackExam);
+        } catch (e) {
+            throw createExamSourceError("NORMALIZATION_ERROR", "فشل في تسوية (normalize) بيانات الاختبارات بعد فك التشفير.", e);
+        }
     };
 
     const parseLuminovaPayload = (text, target) => {
@@ -337,25 +395,24 @@
         const raw = String(text || '').replace(/^\uFEFF/, '').trim();
 
         if (target === 'exams') {
-            const packRegex = /(?:window\.)?__LUMINOVA_EXAM_PACK__\s*=\s*(\{[\s\S]*?\})\s*;?\s*$/;
-            const packMatch = raw.match(packRegex);
-            if (packMatch && packMatch[1]) {
-                try {
-                    const pack = JSON.parse(packMatch[1]);
-                    return decodeLxp2ExamPackForCms(pack);
-                } catch (err) {
-                    console.warn("Failed to parse/decode LXP2 pack via regex:", err);
-                }
+            const packText = extractPackJson(raw);
+            if (!packText) {
+                throw createExamSourceError(
+                    "WRAPPER_NOT_FOUND",
+                    "ملف الاختبارات لا يحتوي على الغلاف المناسب (__LUMINOVA_EXAM_PACK__)."
+                );
             }
-            if (raw.includes('"alg"') && raw.includes('"luminova-lxp-v2"')) {
-                try {
-                    const cleanRaw = raw.replace(/^(?:window\.)?__LUMINOVA_EXAM_PACK__\s*=\s*/, '').replace(/;\s*$/, '');
-                    const pack = JSON.parse(cleanRaw);
-                    return decodeLxp2ExamPackForCms(pack);
-                } catch (err) {
-                    console.warn("Failed to parse direct LXP2 JSON:", err);
-                }
+            let pack;
+            try {
+                pack = JSON.parse(packText);
+            } catch (error) {
+                throw createExamSourceError(
+                    "PARSE_ERROR",
+                    "فشل في تحليل كود JSON الخاص بالغلاف.",
+                    error
+                );
             }
+            return decodeLxp2ExamPackForCms(pack);
         }
 
         const candidates = [raw];
@@ -388,6 +445,356 @@
         const schema = FILE_SCHEMAS[target];
         if (!schema) return;
         window[schema.variable] = payload;
+    };
+
+    // أدوات تهيئة جلب الملفات من جيت هب
+    const withCacheBust = (url) => {
+        const separator = url.includes("?") ? "&" : "?";
+        return `${url}${separator}lmv=${Date.now()}`;
+    };
+
+    const parseGithubRawUrl = (url) => {
+        try {
+            const u = new URL(url);
+            if (u.hostname === 'raw.githubusercontent.com') {
+                const parts = u.pathname.split('/').filter(Boolean);
+                if (parts.length >= 3) {
+                    return {
+                        owner: parts[0],
+                        repo: parts[1],
+                        branch: parts[2],
+                        path: parts.slice(3).join('/')
+                    };
+                }
+            }
+        } catch (e) {
+            console.error("Failed to parse GitHub URL:", url, e);
+        }
+        return null;
+    };
+
+    const getGithubLastCommit = async (url) => {
+        const meta = parseGithubRawUrl(url);
+        if (!meta) return null;
+        try {
+            const apiUrl = `https://api.github.com/repos/${meta.owner}/${meta.repo}/commits?path=${encodeURIComponent(meta.path)}&sha=${encodeURIComponent(meta.branch)}&per_page=1`;
+            const res = await fetch(withCacheBust(apiUrl), {
+                cache: "no-store",
+                headers: {
+                    Accept: "application/vnd.github+json"
+                }
+            });
+            if (!res.ok) return null;
+            const commits = await res.json();
+            const commit = Array.isArray(commits) ? commits[0] : null;
+            return commit ? (commit.commit?.committer?.date || commit.commit?.author?.date || null) : null;
+        } catch (e) {
+            console.warn("Failed to fetch commit meta:", e);
+            return null;
+        }
+    };
+
+    const calculateSourceHash = async (text) => {
+        try {
+            const bytes = new TextEncoder().encode(text);
+            const digest = await crypto.subtle.digest("SHA-256", bytes);
+            return Array.from(new Uint8Array(digest))
+                .map(byte => byte.toString(16).padStart(2, "0"))
+                .join("");
+        } catch (e) {
+            let hash = 0;
+            for (let i = 0; i < text.length; i++) {
+                const char = text.charCodeAt(i);
+                hash = (hash << 5) - hash + char;
+                hash |= 0;
+            }
+            return String(hash);
+        }
+    };
+
+    const fetchGithubSource = async ({ key, label, url }) => {
+        const result = {
+            key,
+            label,
+            url,
+            status: 'SUCCESS',
+            msg: '',
+            data: null,
+            hash: null,
+            fetchedAt: new Date().toLocaleString('ar-EG'),
+            githubUpdatedAt: null
+        };
+
+        try {
+            const commitTime = await getGithubLastCommit(url);
+            if (commitTime) {
+                result.githubUpdatedAt = new Date(commitTime).toLocaleString('ar-EG');
+            }
+        } catch (e) {
+            console.warn(`Failed to fetch metadata for ${label}:`, e);
+        }
+
+        try {
+            const response = await fetch(withCacheBust(url), {
+                method: 'GET',
+                cache: 'no-store',
+                headers: {
+                    Accept: 'text/plain, application/javascript'
+                }
+            });
+
+            if (response.status === 404) {
+                result.status = '404_NOT_FOUND';
+                result.msg = `ملف ${label} غير موجود على GitHub. قد يكون الملف قد تم حذفه أو تغيير مساره.`;
+                return result;
+            }
+
+            if (!response.ok) {
+                result.status = 'HTTP_ERROR';
+                result.msg = `خطأ في الاستجابة من GitHub (رمز الحالة: ${response.status}).`;
+                return result;
+            }
+
+            const text = await response.text();
+            if (!text || !text.trim()) {
+                result.status = 'EMPTY_FILE';
+                result.msg = `ملف ${label} فارغ أو لا يحتوي على بيانات.`;
+                return result;
+            }
+
+            result.hash = await calculateSourceHash(text);
+
+            try {
+                const parsed = parseLuminovaPayload(text, key);
+                result.data = parsed;
+            } catch (parseError) {
+                console.error(`Parse error for ${label}:`, parseError);
+                if (parseError.status) {
+                    result.status = parseError.status;
+                    result.msg = parseError.message;
+                } else if (key === 'exams' && (text.includes('__LUMINOVA_EXAM_PACK__') || text.includes('luminova-lxp-v2'))) {
+                    result.status = 'INVALID_LXP2_PACK';
+                    result.msg = `تم تحميل ملف الاختبارات من GitHub، لكن تنسيق LXP2 غير صالح أو غير مدعوم.`;
+                } else {
+                    result.status = 'PARSE_ERROR';
+                    result.msg = `تم تحميل ملف ${label} من GitHub، لكن تنسيقه غير صالح أو غير مدعوم.`;
+                }
+            }
+
+        } catch (networkError) {
+            console.error(`Network error for ${label}:`, networkError);
+            result.status = 'NETWORK_ERROR';
+            result.msg = `تعذر الاتصال بملف ${label} على GitHub. تحقق من اتصال الإنترنت أو صلاحية الرابط، ثم أعد المحاولة.`;
+        }
+
+        return result;
+    };
+
+    const encodeLxp2ExamPack = (normalizedExams) => {
+        // --- LXP2 Positional Pack Helpers ---
+        const asText = (value) => {
+          if (value === null || value === undefined) return "";
+          if (typeof value === "string") return value;
+          if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+          if (typeof value === "object") {
+            return String(
+              value.text ??
+              value.textAr ??
+              value.textEn ??
+              value.label ??
+              value.title ??
+              value.name ??
+              value.value ??
+              value.id ??
+              ""
+            );
+          }
+          return "";
+        };
+
+        const asId = (value, fallback = "") => {
+          if (value === null || value === undefined) return String(fallback);
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            return String(value);
+          }
+          if (typeof value === "object") {
+            return String(
+              value.id ??
+              value.value ??
+              value.key ??
+              value.code ??
+              value.text ??
+              value.label ??
+              fallback
+            );
+          }
+          return String(fallback);
+        };
+
+        const asNumber = (value, fallback = 0) => {
+          const n = Number(value);
+          return Number.isFinite(n) ? n : fallback;
+        };
+
+        const asTextArray = (value) => {
+          if (!Array.isArray(value)) return [];
+          return value.map(item => asText(item)).filter(Boolean);
+        };
+
+        const asIdArray = (value) => {
+          if (!Array.isArray(value)) return [];
+          return value.map((item, index) => asId(item, index)).filter(Boolean);
+        };
+
+        const packOption = (opt, index) => [
+          asId(opt?.id ?? opt?.value ?? opt, index),
+          asText(opt)
+        ];
+
+        const packQuestion = (q, index) => [
+          asId(q.questionId ?? q.id ?? q.uuid, `q_${index + 1}`),
+          asNumber(q.originalIndex ?? q.original_index, index),
+          asText(q.type || "mcq"),
+          asText(q.questionText ?? q.text ?? q.title ?? q.prompt),
+          Array.isArray(q.options) ? q.options.map(packOption) : [],
+          asNumber(q.maxPoints ?? q.points ?? q.score, 1),
+          asText(q.modelAnswer ?? q.correctAnswerText ?? q.answer),
+          asText(q.explanation ?? q.reason ?? q.feedback),
+          asTextArray(q.correctAnswers),
+          asIdArray(q.correctOptionIds),
+          asTextArray(q.acceptedAnswers)
+        ];
+
+        const packExam = (exam) => {
+          const questions = Array.isArray(exam.questions) ? exam.questions : [];
+          const packedQuestions = questions.map(packQuestion);
+
+          const maxScore = asNumber(
+            exam.maxScore,
+            packedQuestions.reduce((sum, q) => sum + asNumber(q[5], 1), 0)
+          );
+
+          const settings = {
+            duplicatePolicy: exam.duplicatePolicy || "prevent_by_email",
+            allowRetakes: !!exam.allowRetakes,
+            maxAttempts: exam.maxAttempts !== undefined && exam.maxAttempts !== null ? Number(exam.maxAttempts) : 1,
+            showResult: exam.showResult !== undefined ? !!exam.showResult : true,
+            resultDisplayMode: exam.resultDisplayMode || "score_with_answers_and_explanations",
+            showScore: exam.showScore !== undefined ? !!exam.showScore : true,
+            showPercentage: exam.showPercentage !== undefined ? !!exam.showPercentage : true,
+            showCorrectAnswers: exam.showCorrectAnswers !== undefined ? !!exam.showCorrectAnswers : true,
+            showModelAnswers: exam.showModelAnswers !== undefined ? !!exam.showModelAnswers : true,
+            showExplanations: exam.showExplanations !== undefined ? !!exam.showExplanations : true,
+            allowReviewAfterSubmit: exam.allowReviewAfterSubmit !== undefined ? !!exam.allowReviewAfterSubmit : true,
+            startTime: exam.startTime || "",
+            endTime: exam.endTime || "",
+            antiCheat: exam.antiCheat || {},
+            latePolicy: exam.latePolicy || "hard_stop"
+          };
+
+          return [
+            asId(exam.quizId ?? exam.id ?? exam.code),
+            asText(exam.title ?? exam.titleAr ?? exam.name),
+            asText(exam.titleAr ?? exam.title ?? exam.name),
+            asText(exam.titleEn ?? exam.title),
+            asText(exam.examMode ?? exam.mode ?? "practice"),
+            asText(exam.webhookUrl),
+            asText(exam.resultSpreadsheetId ?? exam.spreadsheetId),
+            asText(exam.sheetName),
+            asText(exam.schemaHash),
+            asText(exam.preparedSchemaHash ?? exam.schemaHash),
+            asNumber(exam.expectedQuestionCount, packedQuestions.length),
+            maxScore,
+            packedQuestions,
+            asId(exam.subjectId ?? exam.subject_id ?? exam.courseId),
+            asId(exam.categoryId ?? exam.category),
+            asId(exam.levelId ?? exam.level),
+            asNumber(exam.duration ?? exam.timeLimit ?? exam.time),
+            asNumber(exam.passingScore ?? exam.passScore ?? exam.passing),
+            asText(exam.publishStatus ?? exam.status ?? "published"),
+            settings
+          ];
+        };
+
+        const bytesToBase64 = (bytes) => {
+          const chunkSize = 0x8000;
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            let chunkString = "";
+            for (let j = 0; j < chunk.length; j++) {
+              chunkString += String.fromCharCode(chunk[j]);
+            }
+            binary += chunkString;
+          }
+          return btoa(binary);
+        };
+
+        const base64ToBase64Url = (value) => {
+          return value
+            .replace(/\+/g, "-")
+            .replace(/\//g, "_")
+            .replace(/=+$/g, "");
+        };
+
+        const packedPayload = [
+          "LXP2",
+          normalizedExams.map(packExam)
+        ];
+
+        let json;
+        try {
+          json = JSON.stringify(packedPayload);
+        } catch (err) {
+          console.error("Exam pack payload is not JSON-safe", err);
+          throw err;
+        }
+
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode(json);
+
+        const saltBytes = new Uint8Array(32);
+        window.crypto.getRandomValues(saltBytes);
+
+        for (let i = 0; i < bytes.length; i++) {
+          bytes[i] ^= saltBytes[i % saltBytes.length];
+        }
+
+        const saltBase64 = base64ToBase64Url(bytesToBase64(saltBytes));
+        const payloadBase64 = base64ToBase64Url(bytesToBase64(bytes));
+
+        const chunkSize = 12000;
+        const chunks = [];
+
+        for (let i = 0; i < payloadBase64.length; i += chunkSize) {
+          chunks.push(payloadBase64.slice(i, i + chunkSize));
+        }
+
+        chunks.reverse();
+
+        const pack = {
+          v: 2,
+          alg: "luminova-lxp-v2",
+          createdAt: new Date().toISOString(),
+          salt: saltBase64,
+          checksum: String(payloadBase64.length),
+          meta: {
+            examsCount: normalizedExams.length,
+            chunksCount: chunks.length,
+            payloadLength: bytes.length,
+            build: "lxp2-positional-v1"
+          },
+          chunks
+        };
+
+        const outStr = `(function () {
+  "use strict";
+
+  window.__LUMINOVA_EXAM_PACK__ = ${JSON.stringify(pack, null, 2)};
+})();`;
+
+        return outStr;
     };
 
     const getExamIdentity = (exam) => normalizeText(exam?.quizId || exam?.examId || exam?.examCode || exam?.code || exam?.id);
@@ -684,6 +1091,10 @@
         const showModelAnswers = exam.showModelAnswers !== undefined ? !!exam.showModelAnswers : true;
         const showExplanations = exam.showExplanations !== undefined ? !!exam.showExplanations : true;
         const allowReviewAfterSubmit = exam.allowReviewAfterSubmit !== undefined ? !!exam.allowReviewAfterSubmit : true;
+        const startTime = exam.startTime ?? "";
+        const endTime = exam.endTime ?? "";
+        const antiCheat = exam.antiCheat && typeof exam.antiCheat === 'object' ? { ...exam.antiCheat } : {};
+        const latePolicy = exam.latePolicy ?? "hard_stop";
 
         const nextExam = {
             ...exam,
@@ -708,7 +1119,11 @@
             showCorrectAnswers,
             showModelAnswers,
             showExplanations,
-            allowReviewAfterSubmit
+            allowReviewAfterSubmit,
+            startTime,
+            endTime,
+            antiCheat,
+            latePolicy
         };
         nextExam.schemaHash = buildSchemaHash(nextExam);
         nextExam.submissionStatus = getDerivedSubmissionStatus(nextExam);
@@ -1519,34 +1934,9 @@
             // Silently pre-fetch exam.js in the background after initial paint.
             // Uses a dedicated script-injection loader defined inside exam.js.
             const fetchExams = () => {
-                if (window.LUMINOVA_EXAMS) {
-                    // Already loaded (e.g. cached by browser)
-                    setData(prev => ({ ...prev, quizzes: window.LUMINOVA_EXAMS }));
-                    return;
-                }
-
-                // Stale Global Protection
-                window.LUMINOVA_EXAMS = undefined;
-                window.__LUMINOVA_EXAMS__ = undefined;
-                window.__LUMINOVA_EXAM_PACK__ = undefined;
-
-                const script = document.createElement('script');
-                script.src = 'exam.js?v=2';
-                script.setAttribute('data-lmv-page', 'exam');
-                script.onload = () => {
-                    if (window.__LUMINOVA_EXAM_PACK__) {
-                        try {
-                            window.LUMINOVA_EXAMS = decodeLxp2ExamPackForCms(window.__LUMINOVA_EXAM_PACK__);
-                        } catch (e) {
-                            console.error("Failed to decode LXP2 prefetch pack:", e);
-                        }
-                    } else if (window.__LUMINOVA_EXAMS__) {
-                        window.LUMINOVA_EXAMS = window.__LUMINOVA_EXAMS__;
-                    }
-                    setData(prev => ({ ...prev, quizzes: window.LUMINOVA_EXAMS || [] }));
-                };
-                script.onerror = () => console.warn('Luminova: exam.js failed to load.');
-                document.body.appendChild(script);
+                // Consume window.LUMINOVA_EXAMS populated by CMSApp. No local script injections or network requests.
+                const exams = window.LUMINOVA_EXAMS || [];
+                setData(prev => ({ ...prev, quizzes: exams }));
             };
             fetchExams();
         }, []);
@@ -1746,9 +2136,17 @@
     };
 
 
-    Luminova.Pages.AdminCMS = ({ data, setData, lang, goBack }) => {
+    Luminova.Pages.AdminCMS = ({ data, setData, lang, goBack, sourceStatuses, setSourceStatuses, isDirty, setIsDirty, reloadRemoteSource }) => {
         const validTabs = ['news', 'years', 'semesters', 'subjects', 'students', 'summaries', 'quizzes', 'certificates'];
         if (window.CMS_USER_ROLE === 'admin') validTabs.push('merger');
+
+        const handleReloadClick = async (key) => {
+            if (isDirty && isDirty[key]) {
+                const confirmed = confirm('لديك تعديلات غير محفوظة. سيؤدي التحديث من GitHub إلى استبدال النسخة الحالية داخل المحرر. هل تريد المتابعة؟');
+                if (!confirmed) return;
+            }
+            await reloadRemoteSource(key);
+        };
         const [activeTab, setActiveTab] = useState('news');
         const [editingItem, setEditingItem] = useState(null);
         const [subView, setSubView] = useState(''); // '' or 'questions'
@@ -1799,6 +2197,7 @@
                 if (!exists) return prev;
                 const newQuizzes = (prev.quizzes || []).map(item => (item.id === normalized.id || getExamIdentity(item) === getExamIdentity(normalized)) ? normalized : item);
                 window.LUMINOVA_EXAMS = newQuizzes;
+                if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                 return { ...prev, quizzes: newQuizzes };
             });
             return normalized;
@@ -2007,6 +2406,7 @@
                             }
                         });
                         window.LUMINOVA_EXAMS = newQuizzes;
+                        if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                         return { ...prev, quizzes: newQuizzes };
                     });
 
@@ -2085,236 +2485,33 @@
                 return;
             }
 
-            // --- LXP2 Positional Pack Helpers ---
-            const asText = (value) => {
-              if (value === null || value === undefined) return "";
-              if (typeof value === "string") return value;
-              if (typeof value === "number" || typeof value === "boolean") return String(value);
-
-              if (typeof value === "object") {
-                return String(
-                  value.text ??
-                  value.textAr ??
-                  value.textEn ??
-                  value.label ??
-                  value.title ??
-                  value.name ??
-                  value.value ??
-                  value.id ??
-                  ""
-                );
-              }
-              return "";
-            };
-
-            const asId = (value, fallback = "") => {
-              if (value === null || value === undefined) return String(fallback);
-              if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-                return String(value);
-              }
-              if (typeof value === "object") {
-                return String(
-                  value.id ??
-                  value.value ??
-                  value.key ??
-                  value.code ??
-                  value.text ??
-                  value.label ??
-                  fallback
-                );
-              }
-              return String(fallback);
-            };
-
-            const asNumber = (value, fallback = 0) => {
-              const n = Number(value);
-              return Number.isFinite(n) ? n : fallback;
-            };
-
-            const asTextArray = (value) => {
-              if (!Array.isArray(value)) return [];
-              return value.map(item => asText(item)).filter(Boolean);
-            };
-
-            const asIdArray = (value) => {
-              if (!Array.isArray(value)) return [];
-              return value.map((item, index) => asId(item, index)).filter(Boolean);
-            };
-
-            const packOption = (opt, index) => [
-              asId(opt?.id ?? opt?.value ?? opt, index),
-              asText(opt)
-            ];
-
-            const packQuestion = (q, index) => [
-              asId(q.questionId ?? q.id ?? q.uuid, `q_${index + 1}`),
-              asNumber(q.originalIndex ?? q.original_index, index),
-              asText(q.type || "mcq"),
-              asText(q.questionText ?? q.text ?? q.title ?? q.prompt),
-              Array.isArray(q.options) ? q.options.map(packOption) : [],
-              asNumber(q.maxPoints ?? q.points ?? q.score, 1),
-              asText(q.modelAnswer ?? q.correctAnswerText ?? q.answer),
-              asText(q.explanation ?? q.reason ?? q.feedback),
-              asTextArray(q.correctAnswers),
-              asIdArray(q.correctOptionIds),
-              asTextArray(q.acceptedAnswers)
-            ];
-
-             const packExam = (exam) => {
-              const questions = Array.isArray(exam.questions) ? exam.questions : [];
-              const packedQuestions = questions.map(packQuestion);
-
-              const maxScore = asNumber(
-                exam.maxScore,
-                packedQuestions.reduce((sum, q) => sum + asNumber(q[5], 1), 0)
-              );
-
-              const settings = {
-                duplicatePolicy: exam.duplicatePolicy || "prevent_by_email",
-                allowRetakes: !!exam.allowRetakes,
-                maxAttempts: exam.maxAttempts !== undefined && exam.maxAttempts !== null ? Number(exam.maxAttempts) : 1,
-                showResult: exam.showResult !== undefined ? !!exam.showResult : true,
-                resultDisplayMode: exam.resultDisplayMode || "score_with_answers_and_explanations",
-                showScore: exam.showScore !== undefined ? !!exam.showScore : true,
-                showPercentage: exam.showPercentage !== undefined ? !!exam.showPercentage : true,
-                showCorrectAnswers: exam.showCorrectAnswers !== undefined ? !!exam.showCorrectAnswers : true,
-                showModelAnswers: exam.showModelAnswers !== undefined ? !!exam.showModelAnswers : true,
-                showExplanations: exam.showExplanations !== undefined ? !!exam.showExplanations : true,
-                allowReviewAfterSubmit: exam.allowReviewAfterSubmit !== undefined ? !!exam.allowReviewAfterSubmit : true,
-                startTime: exam.startTime || "",
-                endTime: exam.endTime || "",
-                antiCheat: exam.antiCheat || {},
-                latePolicy: exam.latePolicy || "hard_stop"
-              };
-
-              return [
-                asId(exam.quizId ?? exam.id ?? exam.code),
-                asText(exam.title ?? exam.titleAr ?? exam.name),
-                asText(exam.titleAr ?? exam.title ?? exam.name),
-                asText(exam.titleEn ?? exam.title),
-                asText(exam.examMode ?? exam.mode ?? "practice"),
-                asText(exam.webhookUrl),
-                asText(exam.resultSpreadsheetId ?? exam.spreadsheetId),
-                asText(exam.sheetName),
-                asText(exam.schemaHash),
-                asText(exam.preparedSchemaHash ?? exam.schemaHash),
-                asNumber(exam.expectedQuestionCount, packedQuestions.length),
-                maxScore,
-                packedQuestions,
-                asId(exam.subjectId ?? exam.subject_id ?? exam.courseId),
-                asId(exam.categoryId ?? exam.category),
-                asId(exam.levelId ?? exam.level),
-                asNumber(exam.duration ?? exam.timeLimit ?? exam.time),
-                asNumber(exam.passingScore ?? exam.passScore ?? exam.passing),
-                asText(exam.publishStatus ?? exam.status ?? "published"),
-                settings
-              ];
-            };
-
-            const bytesToBase64 = (bytes) => {
-              const chunkSize = 0x8000;
-              let binary = "";
-              for (let i = 0; i < bytes.length; i += chunkSize) {
-                const chunk = bytes.subarray(i, i + chunkSize);
-                let chunkString = "";
-                for (let j = 0; j < chunk.length; j++) {
-                  chunkString += String.fromCharCode(chunk[j]);
-                }
-                binary += chunkString;
-              }
-              return btoa(binary);
-            };
-
-            const base64ToBase64Url = (value) => {
-              return value
-                .replace(/\+/g, "-")
-                .replace(/\//g, "_")
-                .replace(/=+$/g, "");
-            };
-
-            // --- LXP2 Encrypted Export ---
-            const packedPayload = [
-              "LXP2",
-              normalizedExams.map(packExam)
-            ];
-
-            let json;
             try {
-              json = JSON.stringify(packedPayload);
+                const outStr = encodeLxp2ExamPack(normalizedExams);
+                const blob = new Blob([outStr], { type: "text/javascript;charset=utf-8" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "exam.js";
+                a.click();
+                URL.revokeObjectURL(url);
             } catch (err) {
-              console.error("Exam pack payload is not JSON-safe", err);
-              alert("Exam pack payload is not JSON-safe. Check console.");
-              return;
+                console.error("Failed to export exam pack:", err);
+                alert("فشل تصدير ملف الاختبارات.");
             }
-
-            const encoder = new TextEncoder();
-            const bytes = encoder.encode(json);
-
-            const saltBytes = new Uint8Array(32);
-            window.crypto.getRandomValues(saltBytes);
-
-            for (let i = 0; i < bytes.length; i++) {
-              bytes[i] ^= saltBytes[i % saltBytes.length];
-            }
-
-            const saltBase64 = base64ToBase64Url(bytesToBase64(saltBytes));
-            const payloadBase64 = base64ToBase64Url(bytesToBase64(bytes));
-
-            const chunkSize = 12000;
-            const chunks = [];
-
-            for (let i = 0; i < payloadBase64.length; i += chunkSize) {
-              chunks.push(payloadBase64.slice(i, i + chunkSize));
-            }
-
-            chunks.reverse();
-
-            const pack = {
-              v: 2,
-              alg: "luminova-lxp-v2",
-              createdAt: new Date().toISOString(),
-              salt: saltBase64,
-              checksum: String(payloadBase64.length),
-              meta: {
-                examsCount: exams.length,
-                chunksCount: chunks.length,
-                payloadLength: bytes.length,
-                build: "lxp2-positional-v1"
-              },
-              chunks
-            };
-
-            const outStr = `(function () {
-  "use strict";
-
-  window.__LUMINOVA_EXAM_PACK__ = ${JSON.stringify(pack, null, 2)};
-})();`;
-
-            const blob = new Blob([outStr], { type: "text/javascript;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "exam.js";
-            a.click();
-            URL.revokeObjectURL(url);
         };
 
         // --- MERGER LOGIC ---
         const handleFetchBase = async () => {
             setMergerStatus({ state: 'loading', msg: 'جاري جلب البيانات الحالية من جت هب...' });
             const urls = { data: DATA_URL, exams: EXAM_URL, certs: CERTS_URL };
+            const label = mergerTarget === 'data' ? 'البيانات' : mergerTarget === 'exams' ? 'الاختبارات' : 'الشهادات';
             try {
-                const res = await fetch(urls[mergerTarget] + '?t=' + new Date().getTime());
-                if (!res.ok) throw new Error('فشل جلب الملف');
-                const text = await res.text();
-
-                const extracted = parseLuminovaPayload(text, mergerTarget);
-
-                if (extracted) {
-                    setMergerBase(extracted);
+                const res = await fetchGithubSource({ key: mergerTarget, label, url: urls[mergerTarget] });
+                if (res.status === 'SUCCESS') {
+                    setMergerBase(res.data);
                     setMergerStatus({ state: 'success', msg: `تم جلب بيانات ${mergerTarget} بنجاح.` });
                 } else {
-                    throw new Error('تعذر قراءة بنية الملف.');
+                    throw new Error(res.msg);
                 }
             } catch (e) {
                 setMergerStatus({ state: 'error', msg: 'خطأ: ' + e.message });
@@ -2384,6 +2581,7 @@
                 });
                 setMergerBase(finalData);
                 setMergerLocal(null);
+                if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                 return;
             } else {
                 finalData = mergeArray(mergerBase, mergerLocal);
@@ -2391,6 +2589,7 @@
 
             setMergerBase(finalData);
             setMergerLocal(null);
+            if (setIsDirty) setIsDirty(prev => ({ ...prev, [mergerTarget]: true }));
             setMergerStatus({
                 state: 'merged',
                 msg: `اكتمل الدمج. تمت الإضافة: ${addedCount}، تم التحديث: ${updatedCount}. الإجمالي: ${mergerTarget === 'data' ? 'غير متاح' : finalData.length}`
@@ -2425,7 +2624,7 @@
                 if (legacyWarnings.length && !confirm(['تنبيه قبل تحميل exam.js المدمج:', 'بعض الاختبارات القديمة سيتم تصديرها بوضع Legacy بدون تجهيز شيت تعاقدي.', '', ...legacyWarnings, '', 'هل تريد المتابعة؟'].join('\n'))) {
                     return;
                 }
-                str = `window.LUMINOVA_EXAMS = ${JSON.stringify(normalizedExams.map(stripExamForStudentExport), null, 2)};`;
+                str = encodeLxp2ExamPack(normalizedExams);
                 filename = 'exam.js';
             } else if (mergerTarget === 'certs') {
                 str = `window.LUMINOVA_CERTIFICATES = ${JSON.stringify(mergerBase, null, 2)};`;
@@ -2450,6 +2649,10 @@
 
             if (confirm(lang === 'ar' ? 'تأكيد الحذف؟' : 'تأكيد الحذف؟')) {
                 setData(prev => ({ ...prev, [collection]: prev[collection].filter(item => item.id !== id) }));
+                if (setIsDirty) {
+                    const sourceKey = collection === 'quizzes' ? 'exams' : (collection === 'certificates' ? 'certs' : 'data');
+                    setIsDirty(prev => ({ ...prev, [sourceKey]: true }));
+                }
             }
         };
 
@@ -2526,6 +2729,11 @@
                     window.LUMINOVA_EXAMS = newList;
                 }
 
+                if (setIsDirty) {
+                    const sourceKey = activeTab === 'quizzes' ? 'exams' : (activeTab === 'certificates' ? 'certs' : 'data');
+                    setIsDirty(prev => ({ ...prev, [sourceKey]: true }));
+                }
+
                 return { ...prev, [activeTab]: newList };
             });
             setEditingItem(null);
@@ -2552,6 +2760,7 @@
             setData(prev => {
                 const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
                 window.LUMINOVA_EXAMS = newList;
+                if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                 return { ...prev, [activeTab]: newList };
             });
         };
@@ -2735,6 +2944,7 @@
                                         setData(prev => {
                                             const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
                                             window.LUMINOVA_EXAMS = newList;
+                                            if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                                             return { ...prev, [activeTab]: newList };
                                         });
                                     }} className="p-3 bg-gray-500/10 text-gray-500 rounded-lg hover:bg-gray-500 hover:text-white transition-colors disabled:opacity-30">↑</button>
@@ -2748,6 +2958,7 @@
                                         setData(prev => {
                                             const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
                                             window.LUMINOVA_EXAMS = newList;
+                                            if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                                             return { ...prev, [activeTab]: newList };
                                         });
                                     }} className="p-3 bg-gray-500/10 text-gray-500 rounded-lg hover:bg-gray-500 hover:text-white transition-colors disabled:opacity-30">↓</button>
@@ -2760,6 +2971,7 @@
                                             setData(prev => {
                                                 const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
                                                 window.LUMINOVA_EXAMS = newList;
+                                                if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                                                 return { ...prev, [activeTab]: newList };
                                             });
                                         }
@@ -2913,6 +3125,72 @@
                                 </div>
                             `}
                         </div>
+
+                        ${!editingItem && activeTab !== 'merger' && sourceStatuses && sourceStatuses[activeTab === 'quizzes' ? 'exams' : (activeTab === 'certificates' ? 'certs' : 'data')] && (() => {
+                            const sourceKey = activeTab === 'quizzes' ? 'exams' : (activeTab === 'certificates' ? 'certs' : 'data');
+                            const statusInfo = sourceStatuses[sourceKey];
+                            const label = sourceKey === 'data' ? 'البيانات' : sourceKey === 'exams' ? 'الاختبارات' : 'الشهادات';
+                            
+                            let statusColor = 'text-green-500 bg-green-500/10 border-green-500/20';
+                            let statusIndicator = '🟢';
+                            let statusText = 'متصل';
+                            
+                            if (statusInfo.status === 'SUCCESS') {
+                                if (statusInfo.githubUpdatedAt) {
+                                    statusColor = 'text-green-500 bg-green-500/10 border-green-500/20';
+                                    statusIndicator = '🟢';
+                                    statusText = `متصل — تم تحميل ملف ${label} من GitHub بنجاح`;
+                                } else {
+                                    statusColor = 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
+                                    statusIndicator = '🟡';
+                                    statusText = `تعذر فحص آخر Commit — تم تحميل ملف ${label} بنجاح`;
+                                }
+                            } else if (statusInfo.status === '404_NOT_FOUND') {
+                                statusColor = 'text-red-500 bg-red-500/10 border-red-500/20';
+                                statusIndicator = '🔴';
+                                statusText = `الملف ${label} غير موجود على GitHub`;
+                            } else if (statusInfo.status === 'NETWORK_ERROR' || statusInfo.status === 'HTTP_ERROR') {
+                                statusColor = 'text-red-500 bg-red-500/10 border-red-500/20';
+                                statusIndicator = '🔴';
+                                statusText = `تعذر الاتصال بمصدر ${label}`;
+                            } else if (statusInfo.status === 'INVALID_LXP2_PACK') {
+                                statusColor = 'text-red-500 bg-red-500/10 border-red-500/20';
+                                statusIndicator = '🔴';
+                                statusText = `تنسيق LXP2 غير صالح لملف ${label}`;
+                            } else {
+                                statusColor = 'text-red-500 bg-red-500/10 border-red-500/20';
+                                statusIndicator = '🔴';
+                                statusText = `خطأ في قراءة أو تحليل ملف ${label}`;
+                            }
+
+                            return html`
+                            <div key=${`source-status-${sourceKey}`} className=${`mx-4 mb-6 p-4 rounded-2xl border backdrop-blur-xl flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all duration-300 ${statusColor}`}>
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                    <span className="text-xl animate-pulse">${statusIndicator}</span>
+                                    <div>
+                                        <div className="font-black text-sm md:text-base flex items-center gap-2 flex-wrap">
+                                            <span>المصدر: GitHub</span>
+                                            <span className="opacity-40">|</span>
+                                            <span>الحالة: ${statusText}</span>
+                                            ${isDirty && isDirty[sourceKey] && html`<span className="px-2 py-0.5 text-[10px] bg-red-500 text-white rounded font-black animate-pulse">تعديلات غير محفوظة</span>`}
+                                        </div>
+                                        <div className="text-xs font-bold opacity-75 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                                            <span>آخر تحميل: ${statusInfo.fetchedAt || 'غير معروف'}</span>
+                                            ${statusInfo.githubUpdatedAt && html`
+                                                <span>آخر تحديث على GitHub: ${statusInfo.githubUpdatedAt}</span>
+                                            `}
+                                            <span>الرابط المستخدم: <code className="bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded text-[10px] font-mono select-all">${statusInfo.url}</code></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <button onClick=${() => handleReloadClick(sourceKey)} className="px-4 py-2 bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-xs font-black rounded-xl transition-all flex items-center gap-1.5">
+                                        🔄 تحديث من GitHub
+                                    </button>
+                                </div>
+                            </div>
+                            `;
+                        })()}
 
                         ${examMergeStatus && html`
                             <div key="exam-merge-status" className="mx-4 mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 font-black text-center animate-bounce-subtle">
@@ -3706,72 +3984,133 @@
         const [loadingMsg, setLoadingMsg] = useState('جاري تهيئة التطبيق... برجاء الانتظار');
         const [data, setData] = useState(null);
 
+        // الحالات المضافة للمزامنة والتعديلات المحلية
+        const [sourceStatuses, setSourceStatuses] = useState({
+            data: null,
+            exams: null,
+            certs: null
+        });
+
+        const [isDirty, setIsDirty] = useState({
+            data: false,
+            exams: false,
+            certs: false
+        });
+
+        const loadAndValidateRemoteExams = async () => {
+            const schema = FILE_SCHEMAS.exams;
+            const result = await fetchGithubSource({ key: 'exams', label: 'ملف الاختبارات', url: schema.url });
+            result.ok = result.status === 'SUCCESS';
+            return result;
+        };
+
+        const reloadRemoteSource = async (key) => {
+            const schema = FILE_SCHEMAS[key];
+            if (!schema) return;
+
+            setSourceStatuses(prev => ({
+                ...prev,
+                [key]: { ...prev[key], status: 'LOADING' }
+            }));
+
+            const label = key === 'data' ? 'البيانات' : key === 'exams' ? 'الاختبارات' : 'الشهادات';
+            let result;
+            if (key === 'exams') {
+                result = await loadAndValidateRemoteExams();
+            } else {
+                result = await fetchGithubSource({ key, label, url: schema.url });
+                result.ok = result.status === 'SUCCESS';
+            }
+
+            if (result.ok) {
+                const prevHash = sourceStatuses[key]?.hash;
+                if (sourceStatuses[key] !== null) {
+                    if (prevHash && prevHash !== result.hash) {
+                        alert('تم العثور على تحديث جديد وتحميله.');
+                    } else if (prevHash && prevHash === result.hash) {
+                        alert('أنت تستخدم أحدث نسخة بالفعل.');
+                    } else {
+                        alert(`تم تحميل أحدث نسخة من ملف ${label} بنجاح.`);
+                    }
+                }
+
+                // Update global data variables and React state
+                assignLuminovaPayload(key, result.data);
+                setData(prev => {
+                    const nextData = { ...prev };
+                    if (key === 'data') {
+                        Object.keys(result.data).forEach(field => {
+                            if (field !== 'quizzes' && field !== 'certificates') {
+                                nextData[field] = result.data[field];
+                            }
+                        });
+                    } else if (key === 'exams') {
+                        nextData.quizzes = result.data || [];
+                        window.LUMINOVA_EXAMS = result.data || [];
+                    } else if (key === 'certs') {
+                        nextData.certificates = result.data || [];
+                        window.LUMINOVA_CERTIFICATES = result.data || [];
+                    }
+                    return nextData;
+                });
+
+                // Clear dirty flag upon successful reload
+                setIsDirty(prev => ({ ...prev, [key]: false }));
+            } else {
+                alert(`فشل التحميل من GitHub:\n${result.msg}`);
+            }
+
+            setSourceStatuses(prev => ({
+                ...prev,
+                [key]: result
+            }));
+
+            return result;
+        };
+
         useEffect(() => {
             const fetchInitialData = async () => {
-                setLoadingMsg('جاري تحميل البيانات... برجاء الانتظار');
+                setLoadingMsg('جاري تحميل البيانات من GitHub... برجاء الانتظار');
                 try {
-                    const fetchAndLoad = async (url, fallbackScript) => {
-                        const target = fallbackScript === 'data.js' ? 'data' : fallbackScript === 'exam.js' ? 'exams' : 'certs';
-                        
-                        if (target === 'exams') {
-                            window.LUMINOVA_EXAMS = undefined;
-                            window.__LUMINOVA_EXAMS__ = undefined;
-                            window.__LUMINOVA_EXAM_PACK__ = undefined;
-                        }
+                    // Fetch all three sources in parallel via the unified loader
+                    const [dataRes, examsRes, certsRes] = await Promise.all([
+                        fetchGithubSource({ key: 'data', label: 'البيانات', url: DATA_URL }),
+                        loadAndValidateRemoteExams(),
+                        fetchGithubSource({ key: 'certs', label: 'الشهادات', url: CERTS_URL })
+                    ]);
 
-                        if (url && url !== "PASTE_YOUR_DATA_URL_HERE" && url !== "PASTE_YOUR_EXAM_URL_HERE" && url !== "PASTE_YOUR_CERTS_URL_HERE") {
-                            try {
-                                const res = await fetch(url + '?t=' + new Date().getTime());
-                                if (!res.ok) throw new Error('فشل جلب الملف');
-                                const text = await res.text();
-                                assignLuminovaPayload(target, parseLuminovaPayload(text, target));
-                                return true;
-                            } catch (e) {
-                                console.warn('Failed to fetch from GitHub URL:', url, e);
-                            }
-                        }
+                    dataRes.ok = dataRes.status === 'SUCCESS';
+                    examsRes.ok = examsRes.status === 'SUCCESS';
+                    certsRes.ok = certsRes.status === 'SUCCESS';
 
-                        // Fallback to local script tag. Path is adjusted for /cms/ subfolder.
-                        return new Promise((resolve) => {
-                            const script = document.createElement('script');
-                            script.src = '../' + fallbackScript + '?v=' + Date.now();
-                            script.onload = () => {
-                                if (target === 'exams') {
-                                    if (window.__LUMINOVA_EXAM_PACK__) {
-                                        try {
-                                            window.LUMINOVA_EXAMS = decodeLxp2ExamPackForCms(window.__LUMINOVA_EXAM_PACK__);
-                                        } catch (e) {
-                                            console.error("Failed to decode LXP2 fallback pack:", e);
-                                        }
-                                    } else if (window.__LUMINOVA_EXAMS__) {
-                                        window.LUMINOVA_EXAMS = window.__LUMINOVA_EXAMS__;
-                                    }
-                                }
-                                resolve(true);
-                            };
-                            script.onerror = () => resolve(false);
-                            document.body.appendChild(script);
-                        });
-                    };
+                    setSourceStatuses({
+                        data: dataRes,
+                        exams: examsRes,
+                        certs: certsRes
+                    });
 
-                    await fetchAndLoad(DATA_URL, 'data.js');
-                    await fetchAndLoad(EXAM_URL, 'exam.js');
-                    await fetchAndLoad(CERTS_URL, 'certificates.js');
+                    // Check if data.js loaded successfully
+                    if (!dataRes.ok) {
+                        setLoadingMsg(`خطأ حرج: فشل تحميل ملف البيانات الأساسية (data.js) من GitHub.\nالسبب: ${dataRes.msg}`);
+                        return;
+                    }
 
-                    // Wait a moment for global vars to settle
-                    setTimeout(() => {
-                        if (window.LUMINOVA_DATA) {
-                            setData({
-                                ...window.LUMINOVA_DATA,
-                                quizzes: window.LUMINOVA_EXAMS || [],
-                                certificates: window.LUMINOVA_CERTIFICATES || []
-                            });
-                            setDataReady(true);
-                            setLoadingMsg('');
-                        } else {
-                            setLoadingMsg('فشل تحميل data.js. تحقق من المسار أو الرابط');
-                        }
-                    }, 500);
+                    // For exams and certs, if they failed we load empty arrays instead of silent fallbacks
+                    const finalExams = examsRes.ok ? examsRes.data : [];
+                    const finalCerts = certsRes.ok ? certsRes.data : [];
+
+                    // Assign variables to window for legacy code compatibility
+                    window.LUMINOVA_DATA = dataRes.data;
+                    window.LUMINOVA_EXAMS = finalExams;
+                    window.LUMINOVA_CERTIFICATES = finalCerts;
+
+                    setData({
+                        ...dataRes.data,
+                        quizzes: finalExams,
+                        certificates: finalCerts
+                    });
+                    setDataReady(true);
+                    setLoadingMsg('');
 
                 } catch (e) {
                     setLoadingMsg('خطأ حرج أثناء تحميل البيانات: ' + e.message);
@@ -3863,7 +4202,7 @@
                 </div>
             `}
             <div className="relative z-10">
-                <${Luminova.Pages.AdminCMS} data=${data} setData=${setData} lang="ar" goBack=${() => setLoginState({ loggedIn: false, role: null })} />
+                <${Luminova.Pages.AdminCMS} data=${data} setData=${setData} lang="ar" goBack=${() => setLoginState({ loggedIn: false, role: null })} sourceStatuses=${sourceStatuses} setSourceStatuses=${setSourceStatuses} isDirty=${isDirty} setIsDirty=${setIsDirty} reloadRemoteSource=${reloadRemoteSource} />
             </div>
         </div>
     `;
