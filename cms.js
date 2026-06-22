@@ -3204,17 +3204,91 @@
             return normalized;
         };
 
+        const postSubmissionActionViaIframe = (webhookUrl, payload, timeoutMs = 90000) => new Promise((resolve, reject) => {
+            if (typeof document === 'undefined' || typeof window === 'undefined') {
+                reject(new Error('Iframe transport is not available in this environment.'));
+                return;
+            }
+
+            const requestId = `lmv_gas_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            const iframeName = `${requestId}_frame`;
+            const iframe = document.createElement('iframe');
+            const form = document.createElement('form');
+            const payloadInput = document.createElement('input');
+            const transportInput = document.createElement('input');
+            const requestInput = document.createElement('input');
+
+            const cleanup = () => {
+                window.removeEventListener('message', handleMessage);
+                window.clearTimeout(timer);
+                setTimeout(() => {
+                    if (form.parentNode) form.parentNode.removeChild(form);
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 0);
+            };
+
+            const timer = window.setTimeout(() => {
+                cleanup();
+                reject(new Error('انتهت مهلة انتظار رد سكربت جوجل.'));
+            }, timeoutMs);
+
+            function handleMessage(event) {
+                const data = event?.data || {};
+                if (!data || data.type !== 'luminova_submission_response' || data.requestId !== requestId) return;
+                cleanup();
+                if (data.payload && data.payload.status === 'transport_error') {
+                    reject(new Error(data.payload.message || 'فشل نقل الطلب إلى سكربت جوجل.'));
+                    return;
+                }
+                resolve(data.payload || {});
+            }
+
+            window.addEventListener('message', handleMessage);
+
+            iframe.name = iframeName;
+            iframe.style.display = 'none';
+            form.method = 'POST';
+            form.action = webhookUrl;
+            form.target = iframeName;
+            form.enctype = 'application/x-www-form-urlencoded';
+            form.acceptCharset = 'UTF-8';
+            form.style.display = 'none';
+
+            const framedPayload = { ...payload, transport: 'iframe', clientRequestId: requestId };
+            payloadInput.type = 'hidden';
+            payloadInput.name = 'payload';
+            payloadInput.value = JSON.stringify(framedPayload);
+            transportInput.type = 'hidden';
+            transportInput.name = 'transport';
+            transportInput.value = 'iframe';
+            requestInput.type = 'hidden';
+            requestInput.name = 'clientRequestId';
+            requestInput.value = requestId;
+
+            form.appendChild(payloadInput);
+            form.appendChild(transportInput);
+            form.appendChild(requestInput);
+            document.body.appendChild(iframe);
+            document.body.appendChild(form);
+            form.submit();
+        });
+
         const postSubmissionAction = async (webhookUrl, payload) => {
-            const response = await fetch(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify(payload)
-            });
-            const responseText = await response.text();
             try {
-                return responseText ? JSON.parse(responseText) : {};
-            } catch (err) {
-                return { status: response.ok ? 'ok' : 'error', message: responseText };
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload)
+                });
+                const responseText = await response.text();
+                try {
+                    return responseText ? JSON.parse(responseText) : {};
+                } catch (err) {
+                    return { status: response.ok ? 'ok' : 'error', message: responseText };
+                }
+            } catch (fetchErr) {
+                console.warn('Direct Apps Script fetch failed; retrying with iframe transport:', fetchErr);
+                return postSubmissionActionViaIframe(webhookUrl, payload);
             }
         };
 
@@ -3222,7 +3296,7 @@
             const exam = normalizeExamForControl(editingItem || {}, { settings: data.settings || {} });
             const webhookStatus = validateWebhookUrl(exam.webhookUrl);
             if (!webhookStatus.ok) {
-                setSubmissionActionStatus({ state: 'error', msg: 'فشل الاتصال بسكربت جوجل. تأكد من رابط تطبيق الويب وصلاحيات النشر.' });
+                setSubmissionActionStatus({ state: 'error', msg: webhookStatus.message || 'فشل الاتصال بسكربت جوجل. تأكد من رابط تطبيق الويب وصلاحيات النشر.' });
                 return;
             }
             setIsTestingSubmission(true);
@@ -3241,7 +3315,10 @@
                     expectedQuestionCount: 0,
                     ...base
                 });
-                if (!['not_found', 'mismatch'].includes(verifyResult.status)) {
+                const expectedMissingSubmission = verifyResult.status === 'ok'
+                    ? verifyResult.verified === false && verifyResult.code === 'submission_not_found'
+                    : ['not_found', 'mismatch'].includes(verifyResult.status);
+                if (!expectedMissingSubmission) {
                     throw new Error(verifyResult.message || 'أعاد اختبار التحقق حالة غير متوقعة');
                 }
 
@@ -3255,7 +3332,8 @@
                 setSubmissionActionStatus({ state: 'success', msg: 'تم الاتصال بسكربت جوجل بنجاح. نظام التسليم جاهز.' });
                 setEditingItem(updated);
             } catch (err) {
-                setSubmissionActionStatus({ state: 'error', msg: 'فشل الاتصال بسكربت جوجل. تأكد من رابط تطبيق الويب وصلاحيات النشر.' });
+                console.error('Submission connection test failed:', err);
+                setSubmissionActionStatus({ state: 'error', msg: `فشل الاتصال بسكربت جوجل. ${err?.message || 'تأكد من رابط تطبيق الويب وصلاحيات النشر.'}` });
             } finally {
                 setIsTestingSubmission(false);
             }
@@ -3265,7 +3343,10 @@
             const exam = normalizeExamForControl(editingItem || {}, { settings: data.settings || {} });
             const webhookStatus = validateWebhookUrl(exam.webhookUrl);
             if (!webhookStatus.ok || !exam.sheetName || !exam.quizId) {
-                setSubmissionActionStatus({ state: 'error', msg: 'فشل تجهيز شيت الاختبار. راجع رابط السكربت والصلاحيات.' });
+                const configMessage = !webhookStatus.ok
+                    ? webhookStatus.message
+                    : (!exam.sheetName ? 'اسم ورقة النتائج غير موجود.' : 'هوية الاختبار غير موجودة.');
+                setSubmissionActionStatus({ state: 'error', msg: `فشل تجهيز شيت الاختبار. ${configMessage}` });
                 return;
             }
             setIsPreparingExam(true);
@@ -3302,7 +3383,8 @@
                 setEditingItem(updated);
                 setSubmissionActionStatus({ state: 'success', msg: 'تم تجهيز شيت الاختبار بنجاح. الاختبار جاهز لاستقبال تسليمات الطلاب.' });
             } catch (err) {
-                setSubmissionActionStatus({ state: 'error', msg: 'فشل تجهيز شيت الاختبار. راجع رابط السكربت والصلاحيات.' });
+                console.error('Prepare exam sheet failed:', err);
+                setSubmissionActionStatus({ state: 'error', msg: `فشل تجهيز شيت الاختبار. ${err?.message || 'راجع رابط السكربت والصلاحيات.'}` });
             } finally {
                 setIsPreparingExam(false);
             }
@@ -5365,4 +5447,5 @@
     const root = window.ReactDOM.createRoot(document.getElementById('cms-root'));
     root.render(html`<${CMSApp} />`);
 })();
+
 
