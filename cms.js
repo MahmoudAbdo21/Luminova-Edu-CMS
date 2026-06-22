@@ -1250,9 +1250,14 @@
                 ${expanded ? text : text.substring(0, maxLength) + (isLong ? '...' : '')}
             </p>
             ${isLong && html`
-                <button onClick=${(e) => { e.stopPropagation(); setExpanded(!expanded); }} className="inline-flex items-center mt-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 px-2 py-0.5 rounded-full font-bold text-xs transition-all border border-blue-200 dark:border-blue-700 cursor-pointer">
+                <${Luminova.Components.Button}
+                    variant="ghost"
+                    size="sm"
+                    onClick=${(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+                    className="inline-flex items-center mt-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 px-2 py-0.5 rounded-full font-bold text-xs border border-blue-200 dark:border-blue-700"
+                >
                     ${expanded ? Luminova.i18n[lang].readLess : Luminova.i18n[lang].readMore}
-                </button>
+                </${Luminova.Components.Button}>
             `}
         </div>
     `;
@@ -1332,13 +1337,14 @@
                                 sandbox="allow-scripts allow-popups allow-same-origin allow-forms"
                             ></iframe>
                             <div className="flex w-full divide-x divide-gray-700 rtl:divide-x-reverse border-t border-gray-200 dark:border-gray-700">
-                                <button
+                                <${Luminova.Components.Button}
                                     onClick=${() => window.dispatchEvent(new CustomEvent('openFullscreen', { detail: urlStr }))}
-                                    className="flex-1 py-4 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-black transition-all flex items-center justify-center gap-2 border-none"
+                                    variant="ghost"
+                                    className="flex-1 py-4 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-black flex items-center justify-center gap-2 border-none rounded-none"
                                 >
                                     <span className="text-xl leading-none">⛶</span>
-                                    <span>${lang === 'ar' ? 'تكبير' : 'تكبير'}</span>
-                                </button>
+                                    <span>${lang === 'ar' ? 'تكبير' : 'Full Screen'}</span>
+                                </${Luminova.Components.Button}>
                                 <a
                                     href=${urlStr}
                                     target="_blank"
@@ -1417,10 +1423,14 @@
 
         return html`
         <div className="animate-fade-in relative max-w-4xl mx-auto pb-20 mt-4 xl:mt-8 px-2 sm:px-4">
-            <button onClick=${onClose} className="mb-6 flex items-center gap-2 text-brand-DEFAULT hover:text-brand-hover font-bold transition-colors bg-white dark:bg-gray-800 px-4 py-2 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                <span className="text-xl">${lang === 'ar' ? '←' : '→'}</span>
-                <span>${lang === 'ar' ? 'الرجوع للقائمة' : 'الرجوع للقائمة'}</span>
-            </button>
+            <${Luminova.Components.Button}
+                                onClick=${onClose}
+                                variant="outline"
+                                className="mb-6 flex items-center gap-2 bg-white dark:bg-gray-800 text-brand-DEFAULT hover:text-brand-hover border border-gray-100 dark:border-gray-700"
+                            >
+                                <span className="text-xl">${lang === 'ar' ? '←' : '→'}</span>
+                                <span>${lang === 'ar' ? 'الرجوع للقائمة' : 'Back to List'}</span>
+                            </${Luminova.Components.Button}>
             
             ${author && author.id !== 'unknown' && html`
                 <div className="bg-white dark:bg-gray-800 rounded-3xl p-4 sm:p-6 shadow-sm border border-gray-100 dark:border-gray-700 flex items-center gap-4 mb-8">
@@ -1555,17 +1565,29 @@
         <div className="flex flex-col gap-2 p-4 bg-white/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700/50 rounded-xl w-full hover:border-brand-DEFAULT/30 transition-colors">
             <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
                 <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg shadow-inner">
-                    <button onClick=${() => setInputType('url')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'url' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>رابط</button>
-                    <button onClick=${() => setInputType('base64')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'base64' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>ملف مضمن</button>
-                    <button onClick=${() => setInputType('local')} className=${`px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${inputType === 'local' ? 'bg-brand-DEFAULT text-white' : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>مسار محلي</button>
+                    <${Luminova.Components.Button} size="sm" variant=${inputType === 'url' ? 'primary' : 'ghost'} onClick=${() => setInputType('url')} className="px-3 py-1.5 rounded-md text-xs font-bold shadow-sm">رابط</${Luminova.Components.Button}>
+                    <${Luminova.Components.Button} size="sm" variant=${inputType === 'base64' ? 'primary' : 'ghost'} onClick=${() => setInputType('base64')} className="px-3 py-1.5 rounded-md text-xs font-bold shadow-sm">ملف مضمن</${Luminova.Components.Button}>
+                    <${Luminova.Components.Button} size="sm" variant=${inputType === 'local' ? 'primary' : 'ghost'} onClick=${() => setInputType('local')} className="px-3 py-1.5 rounded-md text-xs font-bold shadow-sm">مسار محلي</${Luminova.Components.Button}>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 shadow-inner">
-                        <button onClick=${onMoveUp} disabled=${isFirst} className="px-2 py-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-gray-700 dark:text-gray-300 shadow-sm" title="تحريك لأعلى">↑</button>
+                        <${Luminova.Components.Button} size="sm" variant="ghost" onClick=${onMoveUp} disabled=${isFirst} className="px-2 py-1.5 rounded-md" title="تحريك لأعلى">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                            </svg>
+                        </${Luminova.Components.Button}>
                         <div className="w-[1px] h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
-                        <button onClick=${onMoveDown} disabled=${isLast} className="px-2 py-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-gray-700 dark:text-gray-300 shadow-sm" title="تحريك لأسفل">↓</button>
+                        <${Luminova.Components.Button} size="sm" variant="ghost" onClick=${onMoveDown} disabled=${isLast} className="px-2 py-1.5 rounded-md" title="تحريك لأسفل">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </${Luminova.Components.Button}>
                     </div>
-                    <button onClick=${onRemove} className="text-red-500 hover:text-white hover:bg-red-500 px-3 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition-all border border-red-500/20" title="حذف المرفق">✖</button>
+                    <${Luminova.Components.Button} size="sm" variant="danger" onClick=${onRemove} className="px-3 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm border border-red-500/20" title="حذف المرفق">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </${Luminova.Components.Button}>
                 </div>
             </div>
             <div className="w-full flex flex-col gap-4 mt-2">
@@ -1633,26 +1655,426 @@
                 ${renderedItems}
             </div>
             <div className="flex justify-center pt-4">
-                <button onClick=${() => onChange([...sortedItems, { url: '', titleAr: '', titleEn: '', order: sortedItems.length }])} className="px-8 py-3 bg-brand-DEFAULT/10 hover:bg-brand-DEFAULT text-brand-DEFAULT hover:text-white font-black rounded-xl transition-colors shadow-sm flex items-center gap-2 border border-brand-DEFAULT/30 border-dashed hover:border-solid">
-                    <span className="text-xl">➕</span> إضافة مرفق جديد
-                </button>
+                <${Luminova.Components.Button}
+                    onClick=${() => onChange([...sortedItems, { url: '', titleAr: '', titleEn: '', order: sortedItems.length }])}
+                    variant="outline"
+                    className="px-8 py-3 rounded-xl border-dashed hover:border-solid"
+                    leadingIcon=${html`
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                    `}
+                >
+                    <span>إضافة مرفق جديد</span>
+                </${Luminova.Components.Button}>
             </div>
         </div>
         `;
     };
 
-    Luminova.Components.Button = ({ children, onClick, variant = 'primary', className = "", disabled = false }) => {
-        const variants = {
-            primary: "bg-brand-DEFAULT text-white hover:bg-brand-hover",
-            danger: "bg-red-500 text-white hover:bg-red-600",
-            glass: "glass-card text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800",
+    // Placeholder protection helper functions
+    function protectText(text) {
+        if (!text) return { processed: '', tokens: [] };
+        const tokens = [];
+        let counter = 0;
+        
+        const patterns = [
+            /\$\{[a-zA-Z0-9_]+\}/g, // ${variable}
+            /\{\{[a-zA-Z0-9_]+\}\}/g, // {{name}}
+            /\{[a-zA-Z0-9_]+\}/g, // {score}
+            /%[a-zA-Z0-9_]+%/g, // %VALUE%
+            /https?:\/\/[^\s]+/g, // URLs
+            /[A-Za-z]:\\[a-zA-Z0-9_\-\\.]+/g, // Windows paths
+            /(?:\.\.\/|\.\/|\/[a-zA-Z0-9_\-\/]+)\/[a-zA-Z0-9_\-\/]+\.[a-zA-Z0-9]+/g, // Relative/Unix paths
+            /`{3}[\s\S]*?`{3}/g, // Code blocks ``` ... ```
+            /`[^`\n]+`/g, // inline code `...`
+            /\b(?:LXP2|LXP|CMS|LLM|NMT|ADC|IAM|CORS|HTTPS|HTTP|PORT|URL|SVG|RTL|LTR)\b/gi, // technical abbreviations/IDs
+            /\b[a-zA-Z]+[0-9]+[a-zA-Z0-9]*\b/g // Alphanumeric IDs like LXP2, v3, task-1234
+        ];
+        
+        let processed = text;
+        for (const pattern of patterns) {
+            processed = processed.replace(pattern, (match) => {
+                const randId = Math.random().toString(36).substring(2, 8);
+                const token = `__LMV_${randId}_${counter}__`;
+                tokens.push({
+                    token,
+                    original: match,
+                    regex: new RegExp(`__\\s*LMV\\s*_\\s*${randId}\\s*_\\s*${counter}\\s*__`, 'gi')
+                });
+                counter++;
+                return token;
+            });
+        }
+        
+        return { processed, tokens };
+    }
+
+    function restoreText(translated, tokens) {
+        if (!translated) return '';
+        let restored = translated;
+        for (const t of tokens) {
+            restored = restored.replace(t.regex, t.original);
+        }
+        
+        // Ensure no tokens remain in the output
+        const remainingTokens = restored.match(/__\s*LMV\s*_[a-z0-9]+\s*_\d+\s*__/gi) || [];
+        if (remainingTokens.length > 0) {
+            throw new Error('PLACEHOLDER_RESTORE_FAILED');
+        }
+        return restored;
+    }
+
+    const CMS_TRANSLATION_PROVIDER = "auto";
+
+    async function translateWithBrowser({
+        text,
+        sourceLanguage = "ar",
+        targetLanguage = "en",
+        onDownloadProgress
+    }) {
+        if (typeof window !== "undefined" && (window.location.protocol === "file:" || !window.isSecureContext)) {
+            throw new Error("الترجمة المدمجة في المتصفح تحتاج تشغيل لوحة الإدارة من السيرفر المحلي أو عبر HTTPS.");
+        }
+        if (typeof self === "undefined" || !("Translator" in self)) {
+            throw new Error("BROWSER_TRANSLATOR_UNSUPPORTED");
+        }
+        
+        let availability;
+        try {
+            availability = await self.Translator.availability({
+                sourceLanguage,
+                targetLanguage
+            });
+        } catch (e) {
+            throw new Error("BROWSER_PAIR_UNAVAILABLE");
+        }
+        
+        if (availability === "unavailable") {
+            throw new Error("BROWSER_PAIR_UNAVAILABLE");
+        }
+        
+        let translator = null;
+        try {
+            translator = await self.Translator.create({
+                sourceLanguage,
+                targetLanguage,
+                monitor(monitor) {
+                    monitor.addEventListener("downloadprogress", event => {
+                        let percentage = 0;
+                        if (event.total) {
+                            percentage = Math.round((event.loaded / event.total) * 100);
+                        } else {
+                            percentage = Math.round(event.loaded * 100);
+                        }
+                        onDownloadProgress?.(percentage);
+                    });
+                }
+            });
+        } catch (err) {
+            const msg = err.message || String(err);
+            if (msg.includes("download") || msg.includes("fetch")) {
+                throw new Error("BROWSER_MODEL_DOWNLOAD_FAILED");
+            }
+            throw new Error("BROWSER_TRANSLATOR_CREATE_FAILED");
+        }
+
+        try {
+            const translatedText = await translator.translate(text);
+            return translatedText;
+        } catch (err) {
+            const msg = err.message || String(err);
+            if (msg.includes("abort") || err.name === "AbortError") {
+                throw new Error("BROWSER_ABORTED");
+            }
+            if (msg.includes("permission") || msg.includes("denied")) {
+                throw new Error("BROWSER_PERMISSION_DENIED");
+            }
+            throw new Error("BROWSER_TRANSLATION_FAILED");
+        } finally {
+            if (translator) {
+                try {
+                    translator.destroy?.();
+                } catch (e) {}
+            }
+        }
+    }
+
+    async function translateCmsText({
+        text,
+        sourceLanguage,
+        targetLanguage,
+        fieldType,
+        entityType,
+        mode,
+        providerPreference = CMS_TRANSLATION_PROVIDER,
+        onProgress
+    }) {
+        const { processed, tokens } = protectText(text);
+        
+        // 1. Determine provider selection
+        const isName = mode === 'name_transliteration' || fieldType === 'name';
+        const isLongOrProfessional = (
+            fieldType === 'description' || 
+            fieldType === 'bio' || 
+            fieldType === 'instructions' || 
+            text.length > 120
+        );
+
+        let useBrowser = providerPreference === 'browser' && !isName;
+        let useServer = providerPreference === 'server' || isName || isLongOrProfessional;
+
+        if (providerPreference === 'auto' && !isName && !isLongOrProfessional) {
+            const isSecure = typeof window !== 'undefined' && window.isSecureContext && window.location.protocol !== 'file:';
+            const hasBrowserApi = typeof self !== 'undefined' && 'Translator' in self;
+            if (hasBrowserApi && isSecure) {
+                useBrowser = true;
+            } else {
+                useServer = true;
+            }
+        }
+
+        // Only support ar -> en (or en-US) for browser translator
+        const isArToEn = sourceLanguage === 'ar' && (targetLanguage === 'en' || targetLanguage === 'en-US');
+        if (useBrowser && !isArToEn) {
+            useBrowser = false;
+            useServer = true;
+        }
+
+        let browserError = null;
+        let serverError = null;
+
+        // Try Browser Translation if selected
+        if (useBrowser) {
+            try {
+                // Map targetLanguage to "en" for browser
+                const browserTarget = (targetLanguage === 'en-US') ? 'en' : targetLanguage;
+                const translated = await translateWithBrowser({
+                    text: processed,
+                    sourceLanguage,
+                    targetLanguage: browserTarget,
+                    onDownloadProgress: onProgress
+                });
+                
+                const restored = restoreText(translated, tokens);
+                return {
+                    ok: true,
+                    translatedText: restored,
+                    provider: 'browser',
+                    model: 'chrome-translator',
+                    targetLanguage: browserTarget,
+                    fallbackUsed: false
+                };
+            } catch (err) {
+                browserError = err.message || String(err);
+                // Fallback to server if in auto mode
+                if (providerPreference === 'auto') {
+                    useServer = true;
+                } else {
+                    return {
+                        ok: false,
+                        code: browserError.includes("الترجمة المدمجة") ? "BROWSER_TRANSLATOR_UNSUPPORTED" : browserError,
+                        message: browserError,
+                        provider: 'browser'
+                    };
+                }
+            }
+        }
+
+        // Try Server Translation if selected
+        if (useServer) {
+            try {
+                const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:';
+                const apiBase = (isLocalDev && window.location.port !== '3000') ? 'http://localhost:3000' : '';
+                const response = await fetch(`${apiBase}/api/translation/translate`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    credentials: "same-origin",
+                    body: JSON.stringify({
+                        text: processed,
+                        sourceLanguage,
+                        targetLanguage,
+                        fieldType,
+                        entityType,
+                        mode
+                    })
+                });
+
+                if (!response.ok) {
+                    const errJson = await response.json().catch(() => ({}));
+                    serverError = errJson.message || `HTTP error! status: ${response.status}`;
+                    // Check if we can fallback to browser (in auto mode, if we haven't already tried it)
+                    if (providerPreference === 'auto' && !useBrowser) {
+                        const isSecure = typeof window !== 'undefined' && window.isSecureContext && window.location.protocol !== 'file:';
+                        const hasBrowserApi = typeof self !== 'undefined' && 'Translator' in self;
+                        if (hasBrowserApi && isSecure && isArToEn) {
+                            try {
+                                const browserTarget = (targetLanguage === 'en-US') ? 'en' : targetLanguage;
+                                const translated = await translateWithBrowser({
+                                    text: processed,
+                                    sourceLanguage,
+                                    targetLanguage: browserTarget,
+                                    onDownloadProgress: onProgress
+                                });
+                                
+                                const restored = restoreText(translated, tokens);
+                                return {
+                                    ok: true,
+                                    translatedText: restored,
+                                    provider: 'browser',
+                                    model: 'chrome-translator',
+                                    targetLanguage: browserTarget,
+                                    fallbackUsed: true
+                                };
+                            } catch (fallbackErr) {
+                                return {
+                                    ok: false,
+                                    code: "BOTH_PROVIDERS_UNAVAILABLE",
+                                    message: `Both providers failed. Server error: ${serverError}. Browser error: ${fallbackErr.message || fallbackErr}`,
+                                    provider: 'server'
+                                };
+                            }
+                        }
+                    }
+                    return {
+                        ok: false,
+                        code: errJson.code || "HTTP_ERROR",
+                        message: serverError,
+                        provider: 'google-cloud'
+                    };
+                }
+
+                const json = await response.json();
+                if (json && json.ok && json.translatedText) {
+                    try {
+                        const restored = restoreText(json.translatedText, tokens);
+                        return {
+                            ok: true,
+                            translatedText: restored,
+                            sourceLanguage: json.sourceLanguage,
+                            targetLanguage: json.targetLanguage,
+                            provider: 'google-cloud',
+                            model: json.model,
+                            fallbackUsed: false
+                        };
+                    } catch (restoreErr) {
+                        return {
+                            ok: false,
+                            code: "PLACEHOLDER_RESTORE_FAILED",
+                            message: "Failed to restore protected placeholders in the translated text.",
+                            provider: 'google-cloud'
+                        };
+                    }
+                }
+
+                return {
+                    ok: false,
+                    code: json.code || "INVALID_RESPONSE",
+                    message: json.message || "Invalid response format from translation endpoint.",
+                    provider: 'google-cloud'
+                };
+            } catch (err) {
+                serverError = err.message || String(err);
+                // Fallback to browser (in auto mode, if we haven't already tried it)
+                if (providerPreference === 'auto' && !useBrowser) {
+                    const isSecure = typeof window !== 'undefined' && window.isSecureContext && window.location.protocol !== 'file:';
+                    const hasBrowserApi = typeof self !== 'undefined' && 'Translator' in self;
+                    if (hasBrowserApi && isSecure && isArToEn) {
+                        try {
+                            const browserTarget = (targetLanguage === 'en-US') ? 'en' : targetLanguage;
+                            const translated = await translateWithBrowser({
+                                text: processed,
+                                sourceLanguage,
+                                targetLanguage: browserTarget,
+                                onDownloadProgress: onProgress
+                            });
+                            
+                            const restored = restoreText(translated, tokens);
+                            return {
+                                ok: true,
+                                translatedText: restored,
+                                provider: 'browser',
+                                model: 'chrome-translator',
+                                targetLanguage: browserTarget,
+                                fallbackUsed: true
+                            };
+                        } catch (fallbackErr) {
+                            return {
+                                ok: false,
+                                code: "BOTH_PROVIDERS_UNAVAILABLE",
+                                message: `Both providers failed. Server error: ${serverError}. Browser error: ${fallbackErr.message || fallbackErr}`,
+                                provider: 'server'
+                            };
+                        }
+                    }
+                }
+                return {
+                    ok: false,
+                    code: "NETWORK_ERROR",
+                    message: serverError,
+                    provider: 'google-cloud'
+                };
+            }
+        }
+
+        return {
+            ok: false,
+            code: "NO_PROVIDER_AVAILABLE",
+            message: "No translation provider is available for the current request.",
+            provider: "none"
         };
+    }
+
+    // Premium Semantic Button Component
+    Luminova.Components.CmsButton = ({
+        children,
+        onClick,
+        variant = "secondary",
+        size = "md",
+        loading = false,
+        disabled = false,
+        leadingIcon = null,
+        trailingIcon = null,
+        className = "",
+        type = "button",
+        ...buttonProps
+    }) => {
+        const finalVariant = variant === 'glass' ? 'outline' : variant;
+        const variantClass = `cms-btn-${finalVariant}`;
+        const sizeClass = `cms-btn-${size}`;
+        
+        const handleClick = (e) => {
+            if (disabled || loading) {
+                e.preventDefault();
+                return;
+            }
+            if (onClick) onClick(e);
+        };
+        
         return html`
-        <button disabled=${disabled} onClick=${onClick} className=${`px-4 py-2 rounded-lg font-semibold transition-all shadow hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${variants[variant]} ${className}`}>
+        <button
+            type=${type}
+            disabled=${disabled || loading}
+            onClick=${handleClick}
+            className=${`cms-btn ${variantClass} ${sizeClass} ${className}`}
+            aria-busy=${loading}
+            ...${buttonProps}
+        >
+            ${loading ? html`
+                <svg key="spinner" className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            ` : leadingIcon}
             ${children}
+            ${!loading && trailingIcon}
         </button>
-    `;
+        `;
     };
+
+    Luminova.Components.Button = Luminova.Components.CmsButton;
 
     Luminova.formatDate = (dateString, lang) => {
         if (!dateString) return "";
@@ -1754,9 +2176,14 @@
                 <h2 className="text-3xl lg:text-4xl font-black mb-6 leading-tight bg-gradient-to-r from-brand-gold to-yellow-200 bg-clip-text text-transparent drop-shadow-md">
                     ${lang === 'ar' ? 'للحصول على أفضل تجربة تصفح، يرجى تدوير التابلت أو الآيباد إلى الوضع العرضي' : 'للحصول على أفضل تجربة تصفح، يرجى تدوير الجهاز إلى الوضع العرضي'}
                 </h2>
-                <button onClick=${() => setIgnoreOrientation(true)} className="mt-8 px-8 py-4 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 backdrop-blur-sm font-bold transition-all shadow-xl hover:shadow-2xl active:scale-95 text-xl">
-                    ${lang === 'ar' ? 'إكمال على أي حال' : 'إكمال على أي حال'}
-                </button>
+                <${Luminova.Components.Button}
+                    onClick=${() => setIgnoreOrientation(true)}
+                    variant="ghost"
+                    size="lg"
+                    className="mt-8 px-8 py-4 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 backdrop-blur-sm font-bold text-xl text-white"
+                >
+                    ${lang === 'ar' ? 'إكمال على أي حال' : 'Continue Anyway'}
+                </${Luminova.Components.Button}>
             </div>
         </div>
         `;
@@ -2038,16 +2465,22 @@
                         `}
 
                         <div className="flex gap-3 mt-5">
-                            <button
+                            <${Luminova.Components.Button}
                                 id="admin-modal-cancel"
                                 onClick=${handleAdminCancel}
-                                className="flex-1 py-3.5 rounded-2xl font-black bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 transition-all"
-                            >${lang === 'ar' ? 'تراجع' : 'تراجع'}</button>
-                            <button
+                                variant="secondary"
+                                className="flex-1 py-3.5 rounded-2xl font-black"
+                            >
+                                ${lang === 'ar' ? 'تراجع' : 'Cancel'}
+                            </${Luminova.Components.Button}>
+                            <${Luminova.Components.Button}
                                 id="admin-modal-submit"
                                 onClick=${handleAdminSubmit}
-                                className="flex-1 py-3.5 rounded-2xl font-black bg-gradient-to-r from-brand-DEFAULT to-brand-gold text-white shadow-lg hover:opacity-90 hover:shadow-brand-DEFAULT/40 transition-all"
-                            >${lang === 'ar' ? 'دخول' : 'دخول'}</button>
+                                variant="primary"
+                                className="flex-1 py-3.5 rounded-2xl font-black bg-gradient-to-r from-brand-DEFAULT to-brand-gold text-white shadow-lg"
+                            >
+                                ${lang === 'ar' ? 'دخول' : 'Submit'}
+                            </${Luminova.Components.Button}>
                         </div>
                     </div>
                 </div>
@@ -2072,21 +2505,27 @@
                 ${view !== 'cms' && view !== 'quiz' ? html`
                     <!-- Desktop nav links (hidden on mobile) -->
                     <div key="dt-nav" className="lmv-top-nav-links hidden md:flex items-center gap-1 mx-auto">
-                        <button onClick=${() => changeView('home')} title=${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}
-                            className=${`px-4 py-2.5 rounded-2xl transition-all duration-200 flex gap-2 items-center font-bold text-base flex-shrink-0 ${view === 'home' ? 'text-brand-DEFAULT bg-brand-DEFAULT/15 shadow-inner' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
-                            <${Luminova.Icons.Home} />
+                        <${Luminova.Components.Button} onClick=${() => changeView('home')} title=${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}
+                            variant=${view === 'home' ? 'primary' : 'ghost'}
+                            className="px-4 py-2.5 rounded-2xl flex gap-2 items-center font-bold text-base flex-shrink-0"
+                            leadingIcon=${html`<${Luminova.Icons.Home} />`}
+                        >
                             <span>${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}</span>
-                        </button>
-                        <button onClick=${() => changeView('community')} title=${lang === 'ar' ? Luminova.i18n.ar.community : Luminova.i18n.en.community}
-                            className=${`px-4 py-2.5 rounded-2xl transition-all duration-200 flex gap-2 items-center font-bold text-base flex-shrink-0 ${view === 'community' ? 'text-brand-DEFAULT bg-brand-DEFAULT/15 shadow-inner' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
-                            <${Luminova.Icons.User} />
+                        </${Luminova.Components.Button}>
+                        <${Luminova.Components.Button} onClick=${() => changeView('community')} title=${lang === 'ar' ? Luminova.i18n.ar.community : Luminova.i18n.en.community}
+                            variant=${view === 'community' ? 'primary' : 'ghost'}
+                            className="px-4 py-2.5 rounded-2xl flex gap-2 items-center font-bold text-base flex-shrink-0"
+                            leadingIcon=${html`<${Luminova.Icons.User} />`}
+                        >
                             <span>${lang === 'ar' ? Luminova.i18n.ar.community : Luminova.i18n.en.community}</span>
-                        </button>
-                        <button onClick=${() => changeView('academics')} title=${lang === 'ar' ? Luminova.i18n.ar.academic : Luminova.i18n.en.academic}
-                            className=${`px-4 py-2.5 rounded-2xl transition-all duration-200 flex gap-2 items-center font-bold text-base flex-shrink-0 ${view === 'academics' ? 'text-brand-DEFAULT bg-brand-DEFAULT/15 shadow-inner' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
-                            <${Luminova.Icons.Book} />
+                        </${Luminova.Components.Button}>
+                        <${Luminova.Components.Button} onClick=${() => changeView('academics')} title=${lang === 'ar' ? Luminova.i18n.ar.academic : Luminova.i18n.en.academic}
+                            variant=${view === 'academics' ? 'primary' : 'ghost'}
+                            className="px-4 py-2.5 rounded-2xl flex gap-2 items-center font-bold text-base flex-shrink-0"
+                            leadingIcon=${html`<${Luminova.Icons.Book} />`}
+                        >
                             <span>${lang === 'ar' ? Luminova.i18n.ar.academic : Luminova.i18n.en.academic}</span>
-                        </button>
+                        </${Luminova.Components.Button}>
                     </div>
                     <!-- Mobile: Platform name in center (visible only on mobile) -->
                     <div key="mb-nav" className="flex md:hidden flex-1 justify-center">
@@ -2098,14 +2537,29 @@
 
                 <!-- Right controls -->
                 <div style=${{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                    <button onClick=${toggleLang}
-                        className="font-black text-sm border-2 border-brand-DEFAULT text-brand-DEFAULT px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl hover:bg-brand-DEFAULT hover:text-white transition-all shadow-sm flex-shrink-0">
+                    <${Luminova.Components.Button}
+                        onClick=${toggleLang}
+                        variant="outline"
+                        className="font-black text-sm px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl flex-shrink-0"
+                    >
                         عربي
-                    </button>
-                    <button onClick=${toggleTheme}
-                        className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all text-lg sm:text-xl shadow-inner flex-shrink-0" title="تبديل المظهر">
-                        ${data.settings?.theme === 'dark' ? '☀️' : '🌙'}
-                    </button>
+                    </${Luminova.Components.Button}>
+                    <${Luminova.Components.Button}
+                        onClick=${toggleTheme}
+                        variant="ghost"
+                        className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-lg sm:text-xl shadow-inner flex-shrink-0"
+                        title="تبديل المظهر"
+                    >
+                        ${data.settings?.theme === 'dark' ? html`
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707-.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+                            </svg>
+                        ` : html`
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                            </svg>
+                        `}
+                    </${Luminova.Components.Button}>
                 </div>
             </nav>
             `}
@@ -2117,18 +2571,33 @@
             <!-- Mobile Bottom Navigation Bar (hidden on desktop via CSS) -->
             ${view !== 'cms' && view !== 'quiz' && html`
                 <nav key="bottom-nav-container" className="lmv-bottom-nav" aria-label="التنقل الرئيسي">
-                    <button className=${`lmv-bottom-nav-btn ${view === 'home' ? 'active' : ''}`} onClick=${() => changeView('home')} title=${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}>
-                        <${Luminova.Icons.Home} />
+                    <${Luminova.Components.Button}
+                        variant="ghost"
+                        className=${`lmv-bottom-nav-btn ${view === 'home' ? 'active' : ''}`}
+                        onClick=${() => changeView('home')}
+                        title=${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}
+                        leadingIcon=${html`<${Luminova.Icons.Home} />`}
+                    >
                         <span className="lmv-nav-label">${lang === 'ar' ? Luminova.i18n.ar.home : Luminova.i18n.en.home}</span>
-                    </button>
-                    <button className=${`lmv-bottom-nav-btn ${view === 'academics' ? 'active' : ''}`} onClick=${() => changeView('academics')} title=${lang === 'ar' ? Luminova.i18n.ar.academic : Luminova.i18n.en.academic}>
-                        <${Luminova.Icons.Book} />
+                    </${Luminova.Components.Button}>
+                    <${Luminova.Components.Button}
+                        variant="ghost"
+                        className=${`lmv-bottom-nav-btn ${view === 'academics' ? 'active' : ''}`}
+                        onClick=${() => changeView('academics')}
+                        title=${lang === 'ar' ? Luminova.i18n.ar.academic : Luminova.i18n.en.academic}
+                        leadingIcon=${html`<${Luminova.Icons.Book} />`}
+                    >
                         <span className="lmv-nav-label">${lang === 'ar' ? Luminova.i18n.ar.academic : Luminova.i18n.en.academic}</span>
-                    </button>
-                    <button className=${`lmv-bottom-nav-btn ${view === 'community' ? 'active' : ''}`} onClick=${() => changeView('community')} title=${lang === 'ar' ? Luminova.i18n.ar.community : Luminova.i18n.en.community}>
-                        <${Luminova.Icons.User} />
+                    </${Luminova.Components.Button}>
+                    <${Luminova.Components.Button}
+                        variant="ghost"
+                        className=${`lmv-bottom-nav-btn ${view === 'community' ? 'active' : ''}`}
+                        onClick=${() => changeView('community')}
+                        title=${lang === 'ar' ? Luminova.i18n.ar.community : Luminova.i18n.en.community}
+                        leadingIcon=${html`<${Luminova.Icons.User} />`}
+                    >
                         <span className="lmv-nav-label">${lang === 'ar' ? Luminova.i18n.ar.community : Luminova.i18n.en.community}</span>
-                    </button>
+                    </${Luminova.Components.Button}>
                 </nav>
             `}
         </div>
@@ -2172,6 +2641,538 @@
         const [isTestingSubmission, setIsTestingSubmission] = useState(false);
         const [isPreparingExam, setIsPreparingExam] = useState(false);
         const [isTranslating, setIsTranslating] = useState(false);
+        const [translationMode, setTranslationMode] = useState('auto');
+        const [diagnostics, setDiagnostics] = useState({
+            server: 'Unknown',
+            google: 'Unknown',
+            browser: 'Unknown',
+            secureContext: window.isSecureContext ? 'Yes' : 'No',
+            lastProvider: 'None',
+            lastError: 'None'
+        });
+        const [fieldTranslationMeta, setFieldTranslationMeta] = useState({});
+
+        const [translationState, setTranslationState] = useState({
+            activeKey: null,
+            direction: null,
+            status: 'idle',
+            error: null,
+            progress: null
+        });
+
+        const checkTranslationDiagnostics = useCallback(async () => {
+            const secure = window.isSecureContext && window.location.protocol !== 'file:';
+            
+            let browserStatus = 'Unsupported';
+            if (typeof self !== 'undefined' && 'Translator' in self) {
+                try {
+                    const avail = await self.Translator.availability({ sourceLanguage: 'ar', targetLanguage: 'en' });
+                    if (avail === 'available') {
+                        browserStatus = 'Available';
+                    } else if (avail === 'downloadable') {
+                        browserStatus = 'Download required';
+                    } else {
+                        browserStatus = 'Unsupported';
+                    }
+                } catch (e) {
+                    browserStatus = 'Unsupported';
+                }
+            }
+            
+            let serverStatus = 'Unavailable';
+            let googleStatus = 'Configuration required';
+            
+            try {
+                const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:';
+                const apiBase = (isLocalDev && window.location.port !== '3000') ? 'http://localhost:3000' : '';
+                
+                const healthRes = await fetch(`${apiBase}/api/health`).catch(() => null);
+                if (healthRes && healthRes.ok) {
+                    serverStatus = 'Available';
+                }
+                
+                const transHealthRes = await fetch(`${apiBase}/api/translation/health`).catch(() => null);
+                if (transHealthRes && transHealthRes.ok) {
+                    const transData = await transHealthRes.json();
+                    if (transData.status === 'PROVIDER_READY') {
+                        googleStatus = 'Ready';
+                    } else if (transData.status === 'CONFIGURATION_REQUIRED') {
+                        googleStatus = 'Configuration required';
+                    } else {
+                        googleStatus = 'Error';
+                    }
+                } else {
+                    googleStatus = 'Configuration required';
+                }
+            } catch (e) {
+                serverStatus = 'Unavailable';
+                googleStatus = 'Configuration required';
+            }
+            
+            setDiagnostics(prev => ({
+                ...prev,
+                server: serverStatus,
+                google: googleStatus,
+                browser: browserStatus,
+                secureContext: window.isSecureContext ? 'Yes' : 'No'
+            }));
+        }, []);
+
+        useEffect(() => {
+            checkTranslationDiagnostics();
+        }, [checkTranslationDiagnostics]);
+
+        const handleTranslateField = useCallback(async ({
+            sourceField,
+            targetField,
+            sourceLanguage,
+            targetLanguage,
+            fieldType,
+            entityType,
+            mode = 'standard_translation'
+        }) => {
+            if (!editingItem) return;
+            const sourceValue = (editingItem[sourceField] || '').trim();
+            
+            // Validate source
+            if (!sourceValue) {
+                const emptyMsg = sourceLanguage === 'ar' 
+                    ? 'أدخل النص العربي أولاً قبل الترجمة.' 
+                    : 'Please enter the English text first.';
+                alert(emptyMsg);
+                return;
+            }
+
+            // Target overwrite protection
+            const targetValue = (editingItem[targetField] || '').trim();
+            if (targetValue) {
+                const confirmMsg = lang === 'ar'
+                    ? 'الحقل المستهدف يحتوي بالفعل على محتوى. هل تريد استبداله بالترجمة الجديدة؟'
+                    : 'The target field already contains content. Replace it with a new translation?';
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+            }
+
+            // Update translation state
+            setTranslationState({
+                activeKey: targetField,
+                direction: `${sourceLanguage}-to-${targetLanguage}`,
+                status: 'translating',
+                error: null,
+                progress: null
+            });
+            setIsTranslating(true);
+
+            // Call translateCmsText adapter
+            const result = await translateCmsText({
+                text: sourceValue,
+                sourceLanguage,
+                targetLanguage,
+                fieldType,
+                entityType,
+                mode,
+                providerPreference: translationMode,
+                onProgress: (percentage) => {
+                    setTranslationState(prev => ({
+                        ...prev,
+                        progress: percentage
+                    }));
+                }
+            });
+
+            setIsTranslating(false);
+
+            if (result.ok) {
+                // Populate only the intended target field
+                setEditingItem(prev => {
+                    const updated = { ...prev, [targetField]: result.translatedText };
+                    return updated;
+                });
+                
+                // Mark the correct source as dirty
+                const sourceKey = activeTab === 'quizzes' ? 'exams' : (activeTab === 'certificates' ? 'certs' : 'data');
+                if (setIsDirty) {
+                    setIsDirty(prev => ({ ...prev, [sourceKey]: true }));
+                }
+
+                // Update field translation meta
+                setFieldTranslationMeta(prev => ({
+                    ...prev,
+                    [targetField]: {
+                        provider: result.provider,
+                        model: result.model
+                    }
+                }));
+
+                // Update diagnostics
+                setDiagnostics(prev => ({
+                    ...prev,
+                    lastProvider: result.provider === 'browser' ? 'Browser Translator API' : 'Google Cloud Translation',
+                    lastError: 'None'
+                }));
+
+                setTranslationState({
+                    activeKey: null,
+                    direction: null,
+                    status: 'success',
+                    error: null,
+                    progress: null
+                });
+            } else {
+                console.error('[Luminova CMS] Translation failed:', result);
+                
+                // Handle UI feedback
+                let userFriendlyMsg = lang === 'ar' 
+                    ? 'تعذر إتمام الترجمة حاليًا. لم يتم تغيير النص الحالي.' 
+                    : 'Failed to complete translation. The current text has not been changed.';
+                    
+                if (result.code === 'CONFIGURATION_REQUIRED' || result.code === 'AUTHENTICATION_ERROR') {
+                    userFriendlyMsg = lang === 'ar'
+                        ? 'خدمة الترجمة تحتاج إلى إعداد الاتصال بالسيرفر.'
+                        : 'Translation service needs server configuration setup.';
+                } else if (result.message && result.message.includes("الترجمة المدمجة")) {
+                    userFriendlyMsg = result.message;
+                }
+                
+                alert(userFriendlyMsg);
+
+                // Update diagnostics
+                setDiagnostics(prev => ({
+                    ...prev,
+                    lastError: result.message || String(result.code)
+                }));
+
+                setTranslationState({
+                    activeKey: targetField,
+                    direction: `${sourceLanguage}-to-${targetLanguage}`,
+                    status: 'error',
+                    error: result.message,
+                    progress: null
+                });
+            }
+        }, [editingItem, activeTab, setIsDirty, lang, translationMode]);
+
+        const handleAutoTranslate = useCallback(async () => {
+            if (!editingItem) return;
+            
+            // Define bilingual fields per tab
+            const tabFieldMappings = {
+                news: [
+                    { source: 'titleAr', target: 'titleEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'title' },
+                    { source: 'contentAr', target: 'contentEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'content' }
+                ],
+                summaries: [
+                    { source: 'titleAr', target: 'titleEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'title' },
+                    { source: 'contentAr', target: 'contentEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'content' }
+                ],
+                students: [
+                    { source: 'nameAr', target: 'nameEn', sl: 'ar', tl: 'en-US', mode: 'name_transliteration', fieldType: 'name' },
+                    { source: 'majorAr', target: 'majorEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'major' },
+                    { source: 'bioAr', target: 'bioEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'bio' }
+                ],
+                certificates: [
+                    { source: 'studentName', target: 'studentNameEn', sl: 'ar', tl: 'en-US', mode: 'name_transliteration', fieldType: 'name' },
+                    { source: 'senderName', target: 'senderNameEn', sl: 'ar', tl: 'en-US', mode: 'name_transliteration', fieldType: 'name' },
+                    { source: 'senderRole', target: 'senderRoleEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'role' },
+                    { source: 'title', target: 'titleEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'title' },
+                    { source: 'description', target: 'descriptionEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'description' }
+                ],
+                quizzes: [
+                    { source: 'titleAr', target: 'titleEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'title' }
+                ]
+            };
+            
+            // Fallback for custom tabs (e.g. years, semesters, subjects)
+            const fallbackFields = [
+                { source: 'nameAr', target: 'nameEn', sl: 'ar', tl: 'en-US', mode: 'standard_translation', fieldType: 'name' }
+            ];
+            
+            const fieldsToTranslate = tabFieldMappings[activeTab] || fallbackFields;
+            
+            // Check if there's any source text available
+            let hasAnySource = false;
+            for (const f of fieldsToTranslate) {
+                if ((editingItem[f.source] || '').trim()) {
+                    hasAnySource = true;
+                    break;
+                }
+            }
+                   if (!hasAnySource) {
+                alert(lang === 'ar' ? 'أدخل النص العربي أولاً قبل الترجمة.' : 'Please enter the source text first.');
+                return;
+            }
+            
+            // Check target fields overwrite protection
+            let hasAnyTarget = false;
+            for (const f of fieldsToTranslate) {
+                if ((editingItem[f.target] || '').trim()) {
+                    hasAnyTarget = true;
+                    break;
+                }
+            }
+            
+            if (hasAnyTarget) {
+                const confirmMsg = lang === 'ar'
+                    ? 'بعض الحقول المستهدفة تحتوي بالفعل على محتوى. هل تريد استبدالها بالترجمة الجديدة؟'
+                    : 'Some target fields already contain content. Replace them with new translations?';
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+            }
+            
+            setIsTranslating(true);
+            
+            let successCount = 0;
+            let lastError = null;
+            
+            for (const f of fieldsToTranslate) {
+                const sourceVal = (editingItem[f.source] || '').trim();
+                if (!sourceVal) continue;
+                
+                setTranslationState({
+                    activeKey: f.target,
+                    direction: `${f.sl}-to-${f.tl}`,
+                    status: 'translating',
+                    error: null,
+                    progress: null
+                });
+                
+                const result = await translateCmsText({
+                    text: sourceVal,
+                    sourceLanguage: f.sl,
+                    targetLanguage: f.tl,
+                    fieldType: f.fieldType,
+                    entityType: activeTab,
+                    mode: f.mode,
+                    providerPreference: translationMode,
+                    onProgress: (percentage) => {
+                        setTranslationState(prev => ({
+                            ...prev,
+                            progress: percentage
+                        }));
+                    }
+                });
+                
+                if (result.ok) {
+                    setEditingItem(prev => ({ ...prev, [f.target]: result.translatedText }));
+                    
+                    // Update field meta
+                    setFieldTranslationMeta(prev => ({
+                        ...prev,
+                        [f.target]: {
+                            provider: result.provider,
+                            model: result.model
+                        }
+                    }));
+
+                    // Update diagnostics
+                    setDiagnostics(prev => ({
+                        ...prev,
+                        lastProvider: result.provider === 'browser' ? 'Browser Translator API' : 'Google Cloud Translation',
+                        lastError: 'None'
+                    }));
+
+                    successCount++;
+                } else {
+                    lastError = result;
+                    setDiagnostics(prev => ({
+                        ...prev,
+                        lastError: result.message || String(result.code)
+                    }));
+                }
+            }
+            
+            setIsTranslating(false);
+            
+            if (successCount > 0) {
+                const sourceKey = activeTab === 'quizzes' ? 'exams' : (activeTab === 'certificates' ? 'certs' : 'data');
+                if (setIsDirty) {
+                    setIsDirty(prev => ({ ...prev, [sourceKey]: true }));
+                }
+                
+                setTranslationState({
+                    activeKey: null,
+                    direction: null,
+                    status: 'success',
+                    error: null,
+                    progress: null
+                });
+                
+                if (lastError) {
+                    alert(lang === 'ar' ? 'تمت ترجمة بعض الحقول بنجاح، بينما فشل البعض الآخر.' : 'Some fields were translated, but others failed.');
+                }
+            } else if (lastError) {
+                let userFriendlyMsg = lang === 'ar' 
+                    ? 'تعذر إتمام الترجمة حاليًا. لم يتم تغيير النص الحالي.' 
+                    : 'Failed to complete translation. The current text has not been changed.';
+                    
+                if (lastError.code === 'CONFIGURATION_REQUIRED' || lastError.code === 'AUTHENTICATION_ERROR') {
+                    userFriendlyMsg = lang === 'ar'
+                        ? 'خدمة الترجمة تحتاج إلى إعداد الاتصال بالسيرفر.'
+                        : 'Translation service needs server configuration setup.';
+                } else if (lastError.message && lastError.message.includes("الترجمة المدمجة")) {
+                    userFriendlyMsg = lastError.message;
+                }
+                alert(userFriendlyMsg);
+                
+                setTranslationState({
+                    activeKey: null,
+                    direction: null,
+                    status: 'error',
+                    error: lastError.message,
+                    progress: null
+                });
+            }
+        }, [editingItem, activeTab, setIsDirty, lang, translationMode]);
+
+        const renderFieldTranslator = (sourceField, targetField, mode = 'standard_translation', fieldType = 'content') => {
+            const isStandard = mode === 'standard_translation';
+            const isTranslatingField = translationState.activeKey === targetField && translationState.status === 'translating';
+            
+            let toEnLabel = isStandard 
+                ? (lang === 'ar' ? 'ترجمة إلى الإنجليزية' : 'Translate to English')
+                : (lang === 'ar' ? 'كتابة الاسم بالإنجليزية' : 'Convert to English spelling');
+                
+            if (isTranslatingField && translationState.direction === 'ar-to-en') {
+                if (translationState.progress !== null) {
+                    toEnLabel = `جارٍ تجهيز نموذج الترجمة — ${translationState.progress}%`;
+                } else {
+                    toEnLabel = 'جارٍ الترجمة...';
+                }
+            } else if (isTranslatingField && translationState.direction === 'ar-to-en-upgrade') {
+                toEnLabel = 'جارٍ الترجمة...';
+            }
+                
+            let toArLabel = lang === 'ar' ? 'ترجمة إلى العربية' : 'Translate to Arabic';
+            if (isTranslatingField && translationState.direction === 'en-to-ar') {
+                toArLabel = 'جارٍ الترجمة...';
+            }
+
+            const langIcon = html`
+                <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M
+                        </div>
+                        
+                        <!-- Translation Diagnostics Panel -->
+                        <div key="trans-diag-panel" className="mt-4 bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl xl:rounded-3xl p-4 shadow-lg border border-white/20 dark:border-gray-700/30 space-y-3">
+                            <h4 className="font-black text-sm text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700 pb-2">فحص خدمة الترجمة</h4>
+                            <div className="text-xs space-y-1.5 text-gray-600 dark:text-gray-400">
+                                <div className="flex justify-between"><span>سيرفر CMS:</span> <span className=${diagnostics.server === 'Available' ? 'text-green-500 font-bold' : 'text-red-500 font-bold'}>${diagnostics.server}</span></div>
+                                <div className="flex justify-between"><span>محرّك Google:</span> <span className=${diagnostics.google === 'Ready' ? 'text-green-500 font-bold' : (diagnostics.google === 'Configuration required' ? 'text-amber-500 font-bold' : 'text-red-500 font-bold')}>${diagnostics.google}</span></div>
+                                <div className="flex justify-between"><span>ترجمة المتصفح:</span> <span className=${diagnostics.browser === 'Available' ? 'text-green-500 font-bold' : (diagnostics.browser === 'Download required' ? 'text-amber-500 font-bold' : 'text-gray-500')}>${diagnostics.browser}</span></div>
+                                <div className="flex justify-between"><span>اتصال آمن (Secure):</span> <span>${diagnostics.secureContext}</span></div>
+                                <div className="flex justify-between items-center mt-2">
+                                    <span>وضع الترجمة:</span>
+                                    <select 
+                                        value=${translationMode} 
+                                        onChange=${e => setTranslationMode(e.target.value)}
+                                        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-xs focus:outline-none"
+                                    >
+                                        <option value="auto">Auto</option>
+                                        <option value="browser">Browser</option>
+                                        <option value="server">Server</option>
+                                    </select>
+                                </div>
+                                <div className="flex justify-between"><span>آخر محرّك مستخدم:</span> <span>${diagnostics.lastProvider}</span></div>
+                                <div className="flex justify-between flex-col gap-0.5 mt-1 border-t border-gray-100 dark:border-gray-800 pt-1.5">
+                                    <span>آخر خطأ:</span>
+                                    <span className="text-red-400 break-all font-mono text-[10px] block max-h-16 overflow-y-auto">${diagnostics.lastError}</span>
+                                </div>
+                            </div>
+                            <${Luminova.Components.Button}
+                                variant="outline"
+                                size="sm"
+                                className="w-full text-xs py-1.5 rounded-lg border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                                onClick=${checkTranslationDiagnostics}
+                            >
+                                فحص خدمة الترجمة
+                            </${Luminova.Components.Button}>
+                        </div>
+                    </div>11 21l5-10 5 10M12.751 5c-.347 2.225-1.162 4.356-2.396 6.25" />
+                </svg>
+            `;
+
+            const meta = fieldTranslationMeta[targetField];
+            const targetVal = editingItem ? (editingItem[targetField] || '').trim() : '';
+
+            return html`
+                <div key=${`trans-container-${targetField}`} className="w-full flex flex-col items-end col-span-2 mt-1 mb-3">
+                    <div className="flex gap-2 justify-end w-full">
+                        <${Luminova.Components.Button}
+                            variant="outline"
+                            size="sm"
+                            loading=${isTranslatingField && (translationState.direction === 'ar-to-en' || translationState.direction === 'ar-to-en-upgrade')}
+                            disabled=${isTranslating || !editingItem}
+                            onClick=${() => handleTranslateField({
+                                sourceField,
+                                targetField,
+                                sourceLanguage: 'ar',
+                                targetLanguage: 'en-US',
+                                fieldType,
+                                entityType: activeTab,
+                                mode
+                            })}
+                            leadingIcon=${langIcon}
+                        >
+                            ${toEnLabel}
+                        </${Luminova.Components.Button}>
+                        
+                        ${isStandard && html`
+                            <${Luminova.Components.Button}
+                                variant="outline"
+                                size="sm"
+                                loading=${isTranslatingField && translationState.direction === 'en-to-ar'}
+                                disabled=${isTranslating || !editingItem}
+                                onClick=${() => handleTranslateField({
+                                    sourceField: targetField,
+                                    targetField: sourceField,
+                                    sourceLanguage: 'en-US',
+                                    targetLanguage: 'ar',
+                                    fieldType,
+                                    entityType: activeTab,
+                                    mode
+                                })}
+                                leadingIcon=${langIcon}
+                            >
+                                ${toArLabel}
+                            </${Luminova.Components.Button}>
+                        `}
+
+                        ${meta && meta.provider === 'browser' && targetVal && html`
+                            <${Luminova.Components.Button}
+                                variant="outline"
+                                size="sm"
+                                loading=${isTranslatingField && translationState.direction === 'ar-to-en-upgrade'}
+                                disabled=${isTranslating || !editingItem}
+                                onClick=${() => handleTranslateField({
+                                    sourceField,
+                                    targetField,
+                                    sourceLanguage: 'ar',
+                                    targetLanguage: 'en-US',
+                                    fieldType,
+                                    entityType: activeTab,
+                                    mode,
+                                    forceProviderPreference: 'server'
+                                })}
+                                className="text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                            >
+                                تحسين الترجمة إلى الإنجليزية الأمريكية
+                            </${Luminova.Components.Button}>
+                        `}
+                    </div>
+                    
+                    ${meta && html`
+                        <div key=${`note-${targetField}`} className="text-xs text-gray-400 dark:text-gray-500 mt-1 mr-2 text-right">
+                            ${meta.provider === 'browser' 
+                                ? 'تمت الترجمة محليًا داخل المتصفح' 
+                                : 'تمت الترجمة عبر خدمة الترجمة الاحترافية'}
+                        </div>
+                    `}
+                </div>
+            `;
+        };
+
         const handleOpenReportsHub = useCallback(() => {
             window.open('admin-reports.html', '_blank', 'noopener,noreferrer');
         }, []);
@@ -2202,14 +3203,6 @@
             });
             return normalized;
         };
-
-        const handleAutoTranslate = useCallback(() => {
-            setIsTranslating(true);
-            window.setTimeout(() => {
-                setIsTranslating(false);
-                alert(lang === 'ar' ? 'الترجمة التلقائية غير مفعلة حالياً.' : 'الترجمة التلقائية غير مفعلة حالياً.');
-            }, 150);
-        }, [lang]);
 
         const postSubmissionAction = async (webhookUrl, payload) => {
             const response = await fetch(webhookUrl, {
@@ -2829,7 +3822,7 @@
                             <div key="options-editor-section" className="col-span-2 space-y-3 pt-6">
                                 <label className="block text-sm font-bold mb-2 flex justify-between items-center">
                                     <span>خيارات الإجابة</span>
-                                    <button onClick=${() => setQItem({ ...tempQ, options: [...(tempQ.options || []), ''] })} className="px-3 py-1 bg-brand-DEFAULT text-white text-xs rounded-full font-bold shadow-md hover:scale-105">+ إضافة خيار</button>
+                                    <${Luminova.Components.Button} onClick=${() => setQItem({ ...tempQ, options: [...(tempQ.options || []), ''] })} variant="primary" size="sm">+ إضافة خيار</${Luminova.Components.Button}>
                                 </label>
                                 ${(tempQ.options || ['']).map((opt, idx) => html`
                                     <div key=${idx} className="flex items-center gap-3 bg-white dark:bg-gray-900 border-2 dark:border-gray-800 p-2 rounded-xl focus-within:border-brand-DEFAULT/50 transition-colors">
@@ -2850,7 +3843,7 @@
                                             className="flex-1 bg-transparent p-2 outline-none font-semibold text-lg" 
                                             placeholder=${`الخيار ${idx + 1}`} 
                                         />
-                                        <button onClick=${() => { const newOps = tempQ.options.filter((_, i) => i !== idx); setQItem({ ...tempQ, options: newOps, correctAnswers: [0] }); }} className="p-2 text-red-500 hover:bg-red-500 hover:text-white rounded-lg opacity-50 hover:opacity-100 transition-all"><${Luminova.Icons.Trash}/></button>
+                                        <${Luminova.Components.Button} variant="ghost" size="sm" className="text-red-500 hover:bg-red-500 hover:text-white rounded-lg opacity-50 hover:opacity-100 transition-all" onClick=${() => { const newOps = tempQ.options.filter((_, i) => i !== idx); setQItem({ ...tempQ, options: newOps, correctAnswers: [0] }); }} title="حذف الخيار"><${Luminova.Icons.Trash} /></${Luminova.Components.Button}>
                                     </div>
                                 `)}
                             </div>
@@ -2891,7 +3884,7 @@
                 </div>
                 
                 <div className="mb-6 flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
-                    <${Luminova.Components.Button} onClick=${() => { setQItem(null); setSubView('editQuestion'); }} className="bg-green-500 hover:bg-green-600 shadow-xl shadow-green-500/20 text-xl py-3 px-8 shrink-0 flex items-center justify-center gap-2 rounded-2xl">
+                    <${Luminova.Components.Button} onClick=${() => { setQItem(null); setSubView('editQuestion'); }} variant="success" size="lg" className="shrink-0 flex items-center justify-center gap-2 rounded-2xl">
                         <span>+ إضافة سؤال</span>
                     </${Luminova.Components.Button}>
                     <div className="relative flex-1 max-w-md">
@@ -2905,7 +3898,18 @@
                         />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-lg">🔍</span>
                         ${qSearchQuery && html`
-                            <button key="clear-q-search" onClick=${() => setQSearchQuery('')} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 font-black text-lg p-1">✕</button>
+                            <${Luminova.Components.Button}
+                                key="clear-q-search"
+                                variant="ghost"
+                                size="sm"
+                                onClick=${() => setQSearchQuery('')}
+                                className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1"
+                                title="مسح البحث"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </${Luminova.Components.Button}>
                         `}
                     </div>
                 </div>
@@ -2934,39 +3938,16 @@
                                     </div>
                                 </div>
                                 <div className="flex gap-2 shrink-0 self-end sm:self-center">
-                                    <button disabled=${originalIdx === 0} onClick=${() => {
-                                        const reordered = [...allQuestions];
-                                        const temp = reordered[originalIdx - 1];
-                                        reordered[originalIdx - 1] = reordered[originalIdx];
-                                        reordered[originalIdx] = temp;
-                                        const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: reordered, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
-                                        setEditingItem(updatedQuiz);
-                                        setData(prev => {
-                                            const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
-                                            window.LUMINOVA_EXAMS = newList;
-                                            if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
-                                            return { ...prev, [activeTab]: newList };
-                                        });
-                                    }} className="p-3 bg-gray-500/10 text-gray-500 rounded-lg hover:bg-gray-500 hover:text-white transition-colors disabled:opacity-30">↑</button>
-                                    <button disabled=${originalIdx === allQuestions.length - 1} onClick=${() => {
-                                        const reordered = [...allQuestions];
-                                        const temp = reordered[originalIdx + 1];
-                                        reordered[originalIdx + 1] = reordered[originalIdx];
-                                        reordered[originalIdx] = temp;
-                                        const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: reordered, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
-                                        setEditingItem(updatedQuiz);
-                                        setData(prev => {
-                                            const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
-                                            window.LUMINOVA_EXAMS = newList;
-                                            if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
-                                            return { ...prev, [activeTab]: newList };
-                                        });
-                                    }} className="p-3 bg-gray-500/10 text-gray-500 rounded-lg hover:bg-gray-500 hover:text-white transition-colors disabled:opacity-30">↓</button>
-                                    <button onClick=${() => { setQItem(q); setSubView('editQuestion'); }} className="p-3 bg-blue-500/10 text-blue-500 rounded-lg hover:bg-blue-500 hover:text-white transition-colors"><${Luminova.Icons.Edit} /></button>
-                                    <button onClick=${() => {
-                                        if (confirm('هل تريد حذف السؤال؟')) {
-                                            const updatedQ = allQuestions.filter(x => x.id !== q.id);
-                                            const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: updatedQ, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
+                                    <${Luminova.Components.Button}
+                                        disabled=${originalIdx === 0}
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick=${() => {
+                                            const reordered = [...allQuestions];
+                                            const temp = reordered[originalIdx - 1];
+                                            reordered[originalIdx - 1] = reordered[originalIdx];
+                                            reordered[originalIdx] = temp;
+                                            const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: reordered, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
                                             setEditingItem(updatedQuiz);
                                             setData(prev => {
                                                 const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
@@ -2974,8 +3955,69 @@
                                                 if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
                                                 return { ...prev, [activeTab]: newList };
                                             });
-                                        }
-                                    }} className="p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors"><${Luminova.Icons.Trash} /></button>
+                                        }}
+                                        className="p-3 text-gray-500 rounded-lg"
+                                        title="تحريك لأعلى"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                                        </svg>
+                                    </${Luminova.Components.Button}>
+                                    <${Luminova.Components.Button}
+                                        disabled=${originalIdx === allQuestions.length - 1}
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick=${() => {
+                                            const reordered = [...allQuestions];
+                                            const temp = reordered[originalIdx + 1];
+                                            reordered[originalIdx + 1] = reordered[originalIdx];
+                                            reordered[originalIdx] = temp;
+                                            const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: reordered, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
+                                            setEditingItem(updatedQuiz);
+                                            setData(prev => {
+                                                const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
+                                                window.LUMINOVA_EXAMS = newList;
+                                                if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
+                                                return { ...prev, [activeTab]: newList };
+                                            });
+                                        }}
+                                        className="p-3 text-gray-500 rounded-lg"
+                                        title="تحريك لأسفل"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </${Luminova.Components.Button}>
+                                    <${Luminova.Components.Button}
+                                        variant="outline"
+                                        size="sm"
+                                        onClick=${() => { setQItem(q); setSubView('editQuestion'); }}
+                                        className="p-3 text-blue-500 rounded-lg"
+                                        title="تعديل السؤال"
+                                    >
+                                        <${Luminova.Icons.Edit} />
+                                    </${Luminova.Components.Button}>
+                                    <${Luminova.Components.Button}
+                                        variant="danger"
+                                        size="sm"
+                                        onClick=${() => {
+                                            if (confirm('هل تريد حذف السؤال؟')) {
+                                                const updatedQ = allQuestions.filter(x => x.id !== q.id);
+                                                const updatedQuiz = normalizeExamForControl({ ...editingItem, questions: updatedQ, submissionStatus: editingItem.preparedSchemaHash ? 'schema_changed_after_prepare' : editingItem.submissionStatus }, { settings: data.settings || {} });
+                                                setEditingItem(updatedQuiz);
+                                                setData(prev => {
+                                                    const newList = prev[activeTab].map(i => i.id === updatedQuiz.id ? updatedQuiz : i);
+                                                    window.LUMINOVA_EXAMS = newList;
+                                                    if (setIsDirty) setIsDirty(prev => ({ ...prev, exams: true }));
+                                                    return { ...prev, [activeTab]: newList };
+                                                });
+                                            }
+                                        }}
+                                        className="p-3 text-red-500 rounded-lg"
+                                        title="حذف السؤال"
+                                    >
+                                        <${Luminova.Icons.Trash} />
+                                    </${Luminova.Components.Button}>
                                 </div>
                             </${Luminova.Components.GlassCard}>
                         `;
@@ -3048,10 +4090,15 @@
                         <${Luminova.Components.Button}
                             key="export-data"
                             onClick=${handleExportData}
-                            className="bg-brand-DEFAULT text-white shadow-lg hover:bg-brand-hover text-sm sm:text-base px-4 sm:px-6"
+                            variant="primary"
+                            className="text-sm sm:text-base px-4 sm:px-6"
                             title=${lang === 'ar' ? 'تصدير الإعدادات والأخبار والطلاب والمواد والتلخيصات' : 'تصدير الإعدادات والأخبار والطلاب والمواد والتلخيصات'}
+                            leadingIcon=${html`
+                                <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            `}
                         >
-                            <span className="animate-pulse">💾</span>
                             <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير data.js' : 'تصدير data.js'}</span>
                             <span className="sm:hidden">data.js</span>
                         </${Luminova.Components.Button}>
@@ -3061,10 +4108,15 @@
                         <${Luminova.Components.Button}
                             key="export-certs"
                             onClick=${handleExportCertificates}
-                            className="bg-brand-gold text-black shadow-lg hover:bg-yellow-500 text-sm sm:text-base px-4 sm:px-6 rounded-2xl"
+                            variant="warning"
+                            className="text-sm sm:text-base px-4 sm:px-6 rounded-2xl"
                             title=${lang === 'ar' ? 'تصدير ملف الشهادات فقط' : 'تصدير ملف الشهادات فقط'}
+                            leadingIcon=${html`
+                                <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            `}
                         >
-                            <span>📜</span>
                             <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير certificates.js' : 'تصدير certificates.js'}</span>
                             <span className="sm:hidden">certs.js</span>
                         </${Luminova.Components.Button}>
@@ -3074,10 +4126,15 @@
                         <${Luminova.Components.Button}
                             key="export-exams"
                             onClick=${handleExportExams}
-                            className="bg-indigo-500 text-white shadow-lg hover:bg-indigo-600 text-sm sm:text-base px-4 sm:px-6 rounded-2xl"
+                            variant="secondary"
+                            className="text-sm sm:text-base px-4 sm:px-6 rounded-2xl"
                             title=${lang === 'ar' ? 'تصدير ملف الاختبارات فقط' : 'تصدير ملف الاختبارات فقط'}
+                            leadingIcon=${html`
+                                <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            `}
                         >
-                            <span>📝</span>
                             <span className="hidden sm:inline">${lang === 'ar' ? 'تصدير exam.js' : 'تصدير exam.js'}</span>
                             <span className="sm:hidden">exam.js</span>
                         </${Luminova.Components.Button}>
@@ -3092,13 +4149,17 @@
                     <div className="xl:sticky xl:top-40">
                         <div className="flex xl:flex-col gap-2 sm:gap-3 overflow-x-auto xl:overflow-x-visible pb-2 xl:pb-0 scrollbar-hide bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl xl:rounded-3xl p-3 sm:p-4 shadow-lg border border-white/20 dark:border-gray-700/30">
                         ${validTabs.map(key => html`
-                            <button key=${key} onClick=${() => { setActiveTab(key); setEditingItem(null); setSubView(''); }}
-                                className=${`whitespace-nowrap xl:whitespace-normal xl:w-full text-start px-4 sm:px-6 py-3 sm:py-4 rounded-xl font-bold text-sm sm:text-lg transition-all flex justify-between items-center gap-2 shrink-0 ${activeTab === key ? 'bg-gradient-to-r from-brand-DEFAULT/90 to-brand-hover text-white shadow-xl shadow-brand-DEFAULT/20 scale-[1.02]' : 'bg-gray-50/80 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+                            <${Luminova.Components.Button}
+                                key=${key}
+                                onClick=${() => { setActiveTab(key); setEditingItem(null); setSubView(''); }}
+                                variant=${activeTab === key ? 'primary' : 'ghost'}
+                                className=${`whitespace-nowrap xl:whitespace-normal xl:w-full text-start px-4 sm:px-6 py-3 sm:py-4 rounded-xl font-bold text-sm sm:text-lg transition-all flex justify-between items-center gap-2 shrink-0 ${activeTab === key ? 'bg-gradient-to-r from-brand-DEFAULT/90 to-brand-hover text-white shadow-xl shadow-brand-DEFAULT/20 scale-[1.02]' : 'bg-gray-50/80 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                            >
                                 <span>${Luminova.i18n[lang][key] || key.toUpperCase()}</span>
                                 <span className=${`text-xs font-black px-2 py-0.5 rounded-lg ${activeTab === key ? 'bg-white/20' : 'bg-black/5 dark:bg-white/5'}`}>
                                     ${key === 'students' ? (data.students?.filter(s => !s.isFounder).length || 0) : (data[key]?.length || 0)}
                                 </span>
-                            </button>
+                            </${Luminova.Components.Button}>
                         `)}
                         </div>
                     </div>
@@ -3184,9 +4245,19 @@
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
-                                    <button onClick=${() => handleReloadClick(sourceKey)} className="px-4 py-2 bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-xs font-black rounded-xl transition-all flex items-center gap-1.5">
-                                        🔄 تحديث من GitHub
-                                    </button>
+                                    <${Luminova.Components.Button}
+                                        onClick=${() => handleReloadClick(sourceKey)}
+                                        variant="outline"
+                                        size="sm"
+                                        className="px-4 py-2 bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-xs font-black rounded-xl transition-all flex items-center gap-1.5"
+                                        leadingIcon=${html`
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89H17" />
+                                            </svg>
+                                        `}
+                                    >
+                                        <span>تحديث من GitHub</span>
+                                    </${Luminova.Components.Button}>
                                 </div>
                             </div>
                             `;
@@ -3227,7 +4298,7 @@
                         ${editingItem ? html`
                             <div key="editing-form-container" className="bg-white/70 dark:bg-gray-900/70 p-8 rounded-3xl border-2 border-brand-DEFAULT/20 shadow-inner">
                                 <div className="flex justify-between items-center mb-8 border-b dark:border-gray-700 pb-4">
-                                    <h4 className="text-2xl font-black text-brand-gold">${editingItem.id.includes(activeTab) ? (lang === 'ar' ? 'إنشاء سجل جديد' : 'إنشاء سجل جديد') : (lang === 'ar' ? 'تعديل السجل' : 'تعديل السجل')}</h4>
+                                    <h4 className="text-2xl font-black text-brand-gold">${editingItem.id.includes(activeTab) ? (lang === 'ar' ? 'إنشاء سجل جديد' : 'إنشاء سجل جديد') : (lang === 'تعديل السجل')}</h4>
                                     ${activeTab === 'quizzes' && html`
                                         <${Luminova.Components.Button} key="manage-q-matrix" onClick=${() => setSubView('questionsList')} className="bg-blue-600 hover:bg-blue-700 text-lg px-8 relative overflow-hidden group">
                                             <span className="relative z-10 w-full flex items-center gap-2">📝 إدارة مصفوفة الأسئلة <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">${(editingItem.questions || []).length}</span></span>
@@ -3290,7 +4361,8 @@
                                                 <option value="محمود عبد الرحمن" />
                                             </datalist>
                                         </div>
-                                        <div key="cert-sender-name-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم المرسل/المانح بلغة أخرى" val=${editingItem.senderNameEn} onChange=${v => setEditingItem({ ...editingItem, senderNameEn: v })} /></div>
+                                        ${renderFieldTranslator('senderName', 'senderNameEn', 'name_transliteration', 'name')}
+                                         <div key="cert-sender-name-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="اسم المرسل/المانح بلغة أخرى" val=${editingItem.senderNameEn} onChange=${v => setEditingItem({ ...editingItem, senderNameEn: v })} /></div>
                                         
                                         <div key="cert-sender-role" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
                                             <label className="block text-sm font-black mb-3 opacity-80 text-brand-DEFAULT">دور المرسل أكاديمياً (Sender Role)</label>
@@ -3308,9 +4380,10 @@
                                                 <option value="custom">✏️ تخصيص...</option>
                                             </select>
                                             ${!['زميل أكاديمي', 'دكتور مادة', 'مسؤول المنصة', ''].includes(editingItem.senderRole) && html`
-                                                <div key="cert-custom-sender-role-inputs" className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                                                    <${Luminova.Components.Input} label="صفة المرسل بالعربية" val=${editingItem.senderRole} onChange=${v => setEditingItem({ ...editingItem, senderRole: v })} />
-                                                    <${Luminova.Components.Input} label="صفة المرسل بلغة أخرى" val=${editingItem.senderRoleEn || ''} onChange=${v => setEditingItem({ ...editingItem, senderRoleEn: v })} />
+                                                                                                <div key="cert-custom-sender-role-inputs" className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                                                <div className="w-full"><${Luminova.Components.Input} label="صفة المرسل بالعربية" val=${editingItem.senderRole} onChange=${v => setEditingItem({ ...editingItem, senderRole: v })} /></div>
+                                                ${renderFieldTranslator('senderRole', 'senderRoleEn', 'standard_translation', 'role')}
+                                                <div className="w-full"><${Luminova.Components.Input} label="صفة المرسل بلغة أخرى" val=${editingItem.senderRoleEn || ''} onChange=${v => setEditingItem({ ...editingItem, senderRoleEn: v })} /></div>
                                                 </div>
                                             `}
                                         </div>
@@ -3330,9 +4403,10 @@
                                                  <option value="شهادة مساهمة فعالة">شهادة مساهمة فعالة</option>
                                                  <option value="custom">✏️ كتابة مخصصة...</option>
                                              </select>
-                                             <${Luminova.Components.Input} label="عنوان الشهادة المخصص" val=${editingItem.title} onChange=${v => setEditingItem({ ...editingItem, title: v })} />
-                                        </div>
-                                        <div key="cert-title-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان الشهادة بلغة أخرى" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
+                                                                                          <${Luminova.Components.Input} label="عنوان الشهادة المخصص" val=${editingItem.title} onChange=${v => setEditingItem({ ...editingItem, title: v })} />
+                                             </div>
+                                             ${renderFieldTranslator('title', 'titleEn', 'standard_translation', 'title')}
+                                             <div key="cert-title-en" className="col-span-2 w-full"><${Luminova.Components.Input} label="عنوان الشهادة بلغة أخرى" val=${editingItem.titleEn} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} /></div>
                                         
                                         <div key="cert-desc-select" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
                                              <label className="block text-sm font-black mb-2 opacity-80 text-brand-DEFAULT">الوصف وسبب المنح من القائمة</label>
@@ -3349,9 +4423,10 @@
                                                  <option value="لمساهمته الفعالة والمستمرة في دعم ومساعدة زملاء الدفعة.">لمساهمته الفعالة والمستمرة في دعم ومساعدة زملاء الدفعة.</option>
                                                  <option value="custom">✏️ كتابة مخصصة...</option>
                                              </select>
-                                             <${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح المخصص" val=${editingItem.description} onChange=${v => setEditingItem({ ...editingItem, description: v })} />
-                                        </div>
-                                        <div key="cert-desc-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح بلغة أخرى" val=${editingItem.descriptionEn} onChange=${v => setEditingItem({ ...editingItem, descriptionEn: v })} /></div>
+                                                                                          <${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح المخصص" val=${editingItem.description} onChange=${v => setEditingItem({ ...editingItem, description: v })} />
+                                             </div>
+                                             ${renderFieldTranslator('description', 'descriptionEn', 'standard_translation', 'description')}
+                                             <div key="cert-desc-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="الوصف وسبب المنح بلغة أخرى" val=${editingItem.descriptionEn} onChange=${v => setEditingItem({ ...editingItem, descriptionEn: v })} /></div>
                                         <div key="cert-featured" className="col-span-2 w-full p-4 border border-brand-DEFAULT rounded-xl"><${Luminova.Components.Input} type="checkbox" label="📌 إظهار كشهادة رئيسية في المنصة" val=${editingItem.isFeatured} onChange=${v => setEditingItem({ ...editingItem, isFeatured: v })} /></div>
                                         
                                         <div key="cert-level" className="col-span-2 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -3376,10 +4451,19 @@
                                         </div>
                                         ` : html`<div key="cert-preview-loading" className="col-span-2 p-10 text-center font-bold opacity-50">جاري تحميل معاينة الشهادة...</div>`}
                                     ` : activeTab === 'students' ? html`
-                                        <div key="stud-names" className="col-span-2 flex flex-col md:flex-row gap-4"><div className="w-full"><${Luminova.Components.Input} label="الاسم العربي" val=${editingItem.nameAr} onChange=${v => setEditingItem({ ...editingItem, nameAr: v })} /></div> <div className="w-full"><${Luminova.Components.Input} label="الاسم بلغة أخرى" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div></div>
-                                        <div key="stud-majors" className="col-span-2 flex flex-col md:flex-row gap-4"><div className="w-full"><${Luminova.Components.Input} label="التخصص العربي" val=${editingItem.majorAr} onChange=${v => setEditingItem({ ...editingItem, majorAr: v })} /></div> <div className="w-full"><${Luminova.Components.Input} label="التخصص بلغة أخرى" val=${editingItem.majorEn} onChange=${v => setEditingItem({ ...editingItem, majorEn: v })} /></div></div>
+                                        <div key="stud-names" className="col-span-2 flex flex-col md:flex-row gap-4">
+                                            <div className="w-full"><${Luminova.Components.Input} label="الاسم العربي" val=${editingItem.nameAr} onChange=${v => setEditingItem({ ...editingItem, nameAr: v })} /></div>
+                                            ${renderFieldTranslator('nameAr', 'nameEn', 'name_transliteration', 'name')}
+                                            <div className="w-full"><${Luminova.Components.Input} label="الاسم بلغة أخرى" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div>
+                                         </div>
+                                        <div key="stud-majors" className="col-span-2 flex flex-col md:flex-row gap-4">
+                                            <div className="w-full"><${Luminova.Components.Input} label="التخصص العربي" val=${editingItem.majorAr} onChange=${v => setEditingItem({ ...editingItem, majorAr: v })} /></div>
+                                            ${renderFieldTranslator('majorAr', 'majorEn', 'standard_translation', 'major')}
+                                            <div className="w-full"><${Luminova.Components.Input} label="التخصص بلغة أخرى" val=${editingItem.majorEn} onChange=${v => setEditingItem({ ...editingItem, majorEn: v })} /></div>
+                                         </div>
                                         <div key="stud-bio-ar" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة عربية" val=${editingItem.bioAr} onChange=${v => setEditingItem({ ...editingItem, bioAr: v })} /></div>
-                                        <div key="stud-bio-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة بلغة أخرى" val=${editingItem.bioEn} onChange=${v => setEditingItem({ ...editingItem, bioEn: v })} /></div>
+                                        ${renderFieldTranslator('bioAr', 'bioEn', 'standard_translation', 'bio')}
+                                         <div key="stud-bio-en" className="col-span-2 w-full"><${Luminova.Components.Input} type="textarea" label="نبذة بلغة أخرى" val=${editingItem.bioEn} onChange=${v => setEditingItem({ ...editingItem, bioEn: v })} /></div>
                                         <div key="stud-media" className="col-span-2 w-full">
                                             <${Luminova.Components.UniversalMediaInput} label="مرفقات الطالب / الصورة الشخصية" attachments=${editingItem.mediaUrls || (editingItem.image ? [editingItem.image] : [])} onChange=${v => setEditingItem({ ...editingItem, mediaUrls: v, image: v[0] || '' })} />
                                         </div>
@@ -3531,6 +4615,7 @@
                                                 <div className="col-span-2 md:col-span-1">
                                                     <${Luminova.Components.Input} label="عنوان الاختبار العربي" val=${editingItem.titleAr || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleAr: v })} />
                                                 </div>
+                                                ${renderFieldTranslator('titleAr', 'titleEn', 'standard_translation', 'title')}
                                                 <div className="col-span-2 md:col-span-1">
                                                     <${Luminova.Components.Input} label="عنوان الاختبار الإنجليزي" val=${editingItem.titleEn || editingItem.title || ''} onChange=${v => setEditingItem({ ...editingItem, titleEn: v })} />
                                                 </div>
@@ -3602,8 +4687,8 @@
                                                     </div>
 
                                                     <div key="eval-action-buttons" className="col-span-2 flex flex-col sm:flex-row gap-3 items-stretch mt-2">
-                                                        <button onClick=${handleTestSubmissionConnection} disabled=${isTestingSubmission || !editingExamControl?.transactionalSubmissionEnabled} className="flex-1 p-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black disabled:opacity-50 transition-all">اختبار اتصال التسليم</button>
-                                                        <button onClick=${handlePrepareExamSheet} disabled=${isPreparingExam || !editingExamControl?.transactionalSubmissionEnabled} className="flex-1 p-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black disabled:opacity-50 transition-all">تجهيز شيت الاختبار</button>
+                                                        <${Luminova.Components.Button} onClick=${handleTestSubmissionConnection} disabled=${isTestingSubmission || !editingExamControl?.transactionalSubmissionEnabled} loading=${isTestingSubmission} variant="primary" className="flex-1 p-4 rounded-2xl">اختبار اتصال التسليم</${Luminova.Components.Button}>
+                                                        <${Luminova.Components.Button} onClick=${handlePrepareExamSheet} disabled=${isPreparingExam || !editingExamControl?.transactionalSubmissionEnabled} loading=${isPreparingExam} variant="success" className="flex-1 p-4 rounded-2xl">تجهيز شيت الاختبار</${Luminova.Components.Button}>
                                                     </div>
 
                                                     ${submissionActionStatus && html`<div key="submission-status-alert" className="col-span-2 p-4 rounded-xl text-sm font-black border bg-brand-DEFAULT/10 border-brand-DEFAULT/30 text-brand-DEFAULT">${submissionActionStatus.msg}</div>`}
@@ -3741,19 +4826,22 @@
                                         `}
                                     ` : html`
                                         <div key="default-name-ar-container" className="w-full"><${Luminova.Components.Input} label="الاسم العربي" val=${editingItem.nameAr} onChange=${v => setEditingItem({ ...editingItem, nameAr: v })} /></div>
-                                        <div key="default-name-en-container" className="w-full"><${Luminova.Components.Input} label="الاسم بلغة أخرى" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div>
+                                        ${renderFieldTranslator('nameAr', 'nameEn', 'standard_translation', 'name')}
+                                         <div key="default-name-en-container" className="w-full"><${Luminova.Components.Input} label="الاسم بلغة أخرى" val=${editingItem.nameEn} onChange=${v => setEditingItem({ ...editingItem, nameEn: v })} /></div>
                                     `}
                                 </div>
 
                                 <div className="mt-10 border-t-4 border-gray-200 dark:border-gray-800 pt-6 flex flex-col md:flex-row gap-6 items-center">
                                     <${Luminova.Components.Button} onClick=${handleSave} className="flex-1 w-full text-xl py-4 rounded-2xl shadow-[0_10px_40px_-10px_rgba(6,182,212,0.8)]">${Luminova.i18n[lang].save} Entity To Database</${Luminova.Components.Button}>
-                                    <button
+                                    <${Luminova.Components.Button}
                                         onClick=${handleAutoTranslate}
                                         disabled=${isTranslating}
-                                        className="w-full md:w-auto px-6 py-4 rounded-2xl font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500 hover:text-white transition-all shadow-sm flex items-center justify-center gap-2 border border-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
-                                        ${isTranslating ? html`<span key="translating-spinner" className="animate-spin">🔄</span>` : '🪄'}
+                                        loading=${isTranslating}
+                                        variant="secondary"
+                                        className="w-full md:w-auto text-lg py-4 px-6 rounded-2xl"
+                                    >
                                         ${lang === 'ar' ? 'ترجمة تلقائية للغة الأخرى' : 'ترجمة تلقائية للغة الأخرى'}
-                                    </button>
+                                    </${Luminova.Components.Button}>
                                     <${Luminova.Components.Button} variant="glass" onClick=${() => setEditingItem(null)} className="w-full md:w-[20%] text-xl py-4 rounded-2xl">${Luminova.i18n[lang].cancel}</${Luminova.Components.Button}>
                                 </div>
                             </div>
@@ -3776,16 +4864,43 @@
                                             </h5>
                                             <div className="grid grid-cols-3 gap-3 mb-6">
                                                 ${['data', 'exams', 'certs'].map(t => html`
-                                                    <button key=${t} onClick=${() => { setMergerTarget(t); setMergerBase(null); setMergerLocal(null); setMergerStatus({ state: 'idle', msg: '' }); }}
-                                                        className=${`p-4 rounded-xl border-2 font-black transition-all ${mergerTarget === t ? 'border-brand-DEFAULT bg-brand-DEFAULT/5 text-brand-DEFAULT shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'border-gray-200 dark:border-gray-700 opacity-60'}`}>
-                                                        <div className="text-xl mb-1">${t === 'data' ? '📊' : t === 'exams' ? '📝' : '📜'}</div>
+                                                    <${Luminova.Components.Button}
+                                                        key=${t}
+                                                        onClick=${() => { setMergerTarget(t); setMergerBase(null); setMergerLocal(null); setMergerStatus({ state: 'idle', msg: '' }); }}
+                                                        variant=${mergerTarget === t ? 'primary' : 'outline'}
+                                                        className=${`p-4 rounded-xl border-2 font-black transition-all h-auto flex-col ${mergerTarget === t ? 'border-brand-DEFAULT bg-brand-DEFAULT/5 text-brand-DEFAULT shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'border-gray-200 dark:border-gray-700 opacity-60'}`}
+                                                    >
+                                                        <div className="text-xl mb-1">
+                                                            ${t === 'data' ? html`
+                                                                <svg className="w-6 h-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z" />
+                                                                </svg>
+                                                            ` : t === 'exams' ? html`
+                                                                <svg className="w-6 h-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                                                </svg>
+                                                            ` : html`
+                                                                <svg className="w-6 h-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                                                </svg>
+                                                            `}
+                                                        </div>
                                                         <div className="text-xs uppercase">${t === 'data' ? 'البيانات' : t === 'exams' ? 'الاختبارات' : 'الشهادات'}</div>
-                                                    </button>
+                                                    </${Luminova.Components.Button}>
                                                 `)}
                                             </div>
-                                            <${Luminova.Components.Button} onClick=${handleFetchBase} disabled=${mergerStatus.state === 'loading'} className="w-full py-4 rounded-2xl shadow-xl shadow-brand-DEFAULT/20">
-                                                ${mergerStatus.state === 'loading' ? html`<span className="animate-spin mr-2">🔄</span>` : '⬇️'}
-                                                ${lang === 'ar' ? 'سحب النسخة الحية من جت هب' : 'سحب النسخة الحية من جت هب'}
+                                            <${Luminova.Components.Button}
+                                                onClick=${handleFetchBase}
+                                                loading=${mergerStatus.state === 'loading'}
+                                                variant="primary"
+                                                className="w-full py-4 rounded-2xl shadow-xl shadow-brand-DEFAULT/20"
+                                                leadingIcon=${html`
+                                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7m14-6l-7 7-7-7" />
+                                                    </svg>
+                                                `}
+                                            >
+                                                <span>${lang === 'ar' ? 'سحب النسخة الحية من جت هب' : 'سحب النسخة الحية من جت هب'}</span>
                                             </${Luminova.Components.Button}>
                                         </${Luminova.Components.GlassCard}>
 
@@ -3828,18 +4943,42 @@
                                             `}
 
                                             <div className="mt-8 flex gap-4">
-                                                <${Luminova.Components.Button} onClick=${handleExecuteMerge} disabled=${!mergerBase || !mergerLocal} className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-brand-DEFAULT to-brand-hover shadow-xl shadow-brand-DEFAULT/30 disabled:opacity-30 disabled:grayscale">
-                                                    🚀 ${lang === 'ar' ? 'بدء الدمج الذكي' : 'بدء الدمج الذكي'}
+                                                <${Luminova.Components.Button}
+                                                    onClick=${handleExecuteMerge}
+                                                    disabled=${!mergerBase || !mergerLocal}
+                                                    variant="primary"
+                                                    className="flex-1 py-4 rounded-2xl shadow-xl shadow-brand-DEFAULT/30 disabled:opacity-30 disabled:grayscale"
+                                                    leadingIcon=${html`
+                                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                                        </svg>
+                                                    `}
+                                                >
+                                                    <span>${lang === 'ar' ? 'بدء الدمج الذكي' : 'Start Smart Merge'}</span>
                                                 </${Luminova.Components.Button}>
                                             </div>
                                         </${Luminova.Components.GlassCard}>
 
                                         ${mergerStatus.state === 'merged' && html`
                                             <${Luminova.Components.GlassCard} key="merger-success-card" className="p-6 border-brand-gold/30 bg-brand-gold/5 animate-slide-up">
-                                                <h5 className="font-black text-brand-gold mb-3 flex items-center gap-2">📊 ${lang === 'ar' ? 'نتائج الدمج' : 'نتائج الدمج'}</h5>
+                                                <h5 className="font-black text-brand-gold mb-3 flex items-center gap-2">
+                                                    <svg className="w-5 h-5 inline-block mr-1 text-brand-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z" />
+                                                    </svg>
+                                                    ${lang === 'ar' ? 'نتائج الدمج' : 'Merge Results'}
+                                                </h5>
                                                 <p className="text-sm font-bold opacity-80 mb-6 leading-relaxed">${mergerStatus.msg}</p>
-                                                <${Luminova.Components.Button} onClick=${handleDownloadMerged} className="w-full py-4 rounded-2xl bg-brand-gold text-black font-black shadow-[0_0_20px_rgba(251,191,36,0.3)] hover:shadow-[0_0_35px_rgba(251,191,36,0.5)] transition-all">
-                                                    ✨ ${lang === 'ar' ? 'تحميل الملف النهائي المدمج' : 'تحميل الملف النهائي المدمج'}
+                                                <${Luminova.Components.Button}
+                                                    onClick=${handleDownloadMerged}
+                                                    variant="warning"
+                                                    className="w-full py-4 rounded-2xl font-black shadow-[0_0_20px_rgba(251,191,36,0.3)] hover:shadow-[0_0_35px_rgba(251,191,36,0.5)] transition-all"
+                                                    leadingIcon=${html`
+                                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                        </svg>
+                                                    `}
+                                                >
+                                                    <span>${lang === 'ar' ? 'تحميل الملف النهائي المدمج' : 'Download Merged File'}</span>
                                                 </${Luminova.Components.Button}>
                                             </${Luminova.Components.GlassCard}>
                                         `}
@@ -3937,13 +5076,19 @@
 
                                         <div className="flex gap-2 shrink-0 justify-end mt-4 sm:mt-0">
                                             ${activeTab === 'quizzes' && html`
-                                                <button key="manage-questions" onClick=${() => { setEditingItem({ ...item }); setSubView('questionsList'); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 text-indigo-500 rounded-xl hover:bg-indigo-500 hover:text-white transition-all font-black text-sm border border-indigo-500/20 shadow-sm">
-                                                    <span>📝</span>
-                                                    <span className="bg-indigo-500/20 px-2 py-0.5 rounded-full text-[10px]">${(item.questions || []).length}</span>
-                                                </button>
+                                                <${Luminova.Components.Button}
+                                                    key="manage-questions"
+                                                    onClick=${() => { setEditingItem({ ...item }); setSubView('questionsList'); }}
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="flex items-center gap-2 rounded-xl"
+                                                >
+                                                    <span>${lang === 'ar' ? 'إدارة الأسئلة' : 'Manage Questions'}</span>
+                                                    <span className="bg-indigo-500/10 px-2 py-0.5 rounded-full text-[10px] font-bold">${(item.questions || []).length}</span>
+                                                </${Luminova.Components.Button}>
                                             `}
-                                            <button key="edit-btn" onClick=${() => setEditingItem({ ...item })} className="p-3 bg-brand-DEFAULT/10 text-brand-DEFAULT rounded-xl hover:bg-brand-DEFAULT hover:text-white hover:shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-all border border-brand-DEFAULT/20" title="Edit"><${Luminova.Icons.Edit} /></button>
-                                            <button key="delete-btn" onClick=${() => handleDelete(activeTab, item.id)} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white hover:shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all border border-red-500/20" title="Delete"><${Luminova.Icons.Trash} /></button>
+                                            <${Luminova.Components.Button} key="edit-btn" variant="outline" size="sm" onClick=${() => setEditingItem({ ...item })} className="p-3" title="Edit"><${Luminova.Icons.Edit} /></${Luminova.Components.Button}>
+                                            <${Luminova.Components.Button} key="delete-btn" variant="danger" size="sm" onClick=${() => handleDelete(activeTab, item.id)} className="p-3" title="Delete"><${Luminova.Icons.Trash} /></${Luminova.Components.Button}>
                                         </div>
                                     </div>
                                     `})}
@@ -3954,9 +5099,14 @@
                             
                             ${(!editingItem && cmsVisibleCount < activeTableItems.length) && html`
                                 <div key="show-more-btn-container" className="flex justify-center pt-6 pb-2">
-                                    <button onClick=${() => setCmsVisibleCount(prev => prev + 5)} className="bg-brand-DEFAULT hover:bg-brand-hover text-white font-bold py-2.5 px-8 rounded-xl shadow-md transition-all">
-                                        ${lang === 'ar' ? 'عرض المزيد ➕' : 'عرض المزيد ➕'}
-                                    </button>
+                                    <${Luminova.Components.Button}
+                                        variant="secondary"
+                                        size="md"
+                                        onClick=${() => setCmsVisibleCount(prev => prev + 5)}
+                                        className="py-2.5 px-8"
+                                    >
+                                        <span>${lang === 'ar' ? 'عرض المزيد' : 'Show More'}</span>
+                                    </${Luminova.Components.Button}>
                                 </div>
                             `}
                         `}
@@ -3976,6 +5126,7 @@
     // ==========================================
 
     const CMSApp = () => {
+        const lang = 'ar';
         const [loginState, setLoginState] = useState({ loggedIn: false, role: null });
         const [authError, setAuthError] = useState('');
 
@@ -4175,13 +5326,16 @@
                                 <input name="password" type="password" placeholder="كلمة المرور" className="w-full ps-12 pe-4 py-4 rounded-xl bg-gray-100 dark:bg-white/[0.04] border border-gray-300 dark:border-white/[0.08] outline-none focus:border-brand-DEFAULT/60 focus:bg-white focus:shadow-[0_0_20px_rgba(6,182,212,0.15)] font-bold transition-all text-gray-900 dark:text-white placeholder:text-gray-500" required />
                             </div>
                             ${authError && html`<div className="text-red-400 font-bold text-center text-sm bg-red-500/10 border border-red-500/20 p-3 rounded-xl">${authError}</div>`}
-                            <button type="submit" className="w-full relative overflow-hidden bg-gradient-to-r from-brand-DEFAULT to-cyan-500 text-white font-black py-4 rounded-xl shadow-lg transition-all hover:shadow-[0_0_30px_rgba(6,182,212,0.5)] hover:scale-[1.02] active:scale-95 group">
-                                <span className="relative z-10 flex items-center justify-center gap-2 text-lg">
-                                    دخول آمن
-                                    <span className="group-hover:translate-x-1 transition-transform">➔</span>
+                            <${Luminova.Components.Button}
+                                type="submit"
+                                variant="primary"
+                                size="lg"
+                                className="w-full py-4 rounded-xl shadow-lg"
+                            >
+                                <span className="flex items-center justify-center gap-2 text-lg">
+                                    <span>${lang === 'ar' ? 'دخول آمن' : 'Secure Login'}</span>
                                 </span>
-                                <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-brand-DEFAULT opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                            </button>
+                            </${Luminova.Components.Button}>
                         </form>
                     </div>
                     <p className="text-center text-gray-600 text-xs mt-6 font-bold tracking-widest">منصة لومينوفا التعليمية</p>

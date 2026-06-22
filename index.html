@@ -39,6 +39,250 @@
     <style>
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+        :root {
+            --cms-btn-radius: 12px;
+            --cms-btn-transition: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+            --cms-btn-font-weight: 600;
+            
+            --cms-btn-height-sm: 34px;
+            --cms-btn-height-md: 42px;
+            --cms-btn-height-lg: 48px;
+            
+            /* Semantic Colors matching existing CMS theme */
+            --cms-color-primary: #06b6d4;
+            --cms-color-primary-hover: #0891b2;
+            --cms-color-primary-active: #0e7490;
+            --cms-color-primary-text: #ffffff;
+            --cms-color-primary-shadow: rgba(6, 182, 212, 0.2);
+            
+            --cms-color-secondary: #475569;
+            --cms-color-secondary-hover: #334155;
+            --cms-color-secondary-active: #1e293b;
+            --cms-color-secondary-text: #ffffff;
+            --cms-color-secondary-shadow: rgba(71, 85, 105, 0.15);
+            
+            --cms-color-success: #10b981;
+            --cms-color-success-hover: #059669;
+            --cms-color-success-active: #047857;
+            --cms-color-success-text: #ffffff;
+            --cms-color-success-shadow: rgba(16, 185, 129, 0.2);
+            
+            --cms-color-danger: #ef4444;
+            --cms-color-danger-hover: #dc2626;
+            --cms-color-danger-active: #b91c1c;
+            --cms-color-danger-text: #ffffff;
+            --cms-color-danger-shadow: rgba(239, 68, 68, 0.2);
+            
+            --cms-color-warning: #fbbf24;
+            --cms-color-warning-hover: #f59e0b;
+            --cms-color-warning-active: #d97706;
+            --cms-color-warning-text: #1e293b;
+            --cms-color-warning-shadow: rgba(251, 191, 36, 0.2);
+            
+            --cms-color-ghost-hover: rgba(100, 116, 139, 0.1);
+            --cms-color-ghost-active: rgba(100, 116, 139, 0.18);
+            --cms-color-ghost-text: #475569;
+            
+            --cms-color-outline-border: #cbd5e1;
+            --cms-color-outline-hover: rgba(100, 116, 139, 0.05);
+            --cms-color-outline-active: rgba(100, 116, 139, 0.1);
+            --cms-color-outline-text: #475569;
+            
+            --cms-color-link-text: #06b6d4;
+            --cms-color-link-hover-text: #0891b2;
+        }
+        
+        .dark {
+            --cms-color-secondary: #334155;
+            --cms-color-secondary-hover: #475569;
+            --cms-color-secondary-active: #64748b;
+            --cms-color-secondary-text: #f8fafc;
+            --cms-color-secondary-shadow: rgba(51, 65, 85, 0.3);
+            
+            --cms-color-ghost-hover: rgba(148, 163, 184, 0.1);
+            --cms-color-ghost-active: rgba(148, 163, 184, 0.18);
+            --cms-color-ghost-text: #94a3b8;
+            
+            --cms-color-outline-border: #475569;
+            --cms-color-outline-hover: rgba(148, 163, 184, 0.05);
+            --cms-color-outline-active: rgba(148, 163, 184, 0.1);
+            --cms-color-outline-text: #94a3b8;
+        }
+
+        /* Premium Buttons style classes */
+        .cms-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+            font-weight: var(--cms-btn-font-weight);
+            border-radius: var(--cms-btn-radius);
+            transition: var(--cms-btn-transition);
+            border: 1px solid transparent;
+            cursor: pointer;
+            outline: none;
+            user-select: none;
+            white-space: nowrap;
+            text-align: center;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            gap: 8px;
+        }
+
+        /* Hover elevation effect */
+        .cms-btn:not(:disabled):hover {
+            transform: translateY(-1px);
+        }
+
+        /* Active pressed state */
+        .cms-btn:not(:disabled):active {
+            transform: translateY(0);
+            box-shadow: none;
+        }
+
+        /* Focus rings */
+        .cms-btn:focus-visible {
+            outline: 2px solid var(--cms-color-primary);
+            outline-offset: 2px;
+        }
+
+        /* Disabled State */
+        .cms-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Sizes */
+        .cms-btn-sm {
+            height: var(--cms-btn-height-sm);
+            padding: 0 12px;
+            font-size: 13px;
+        }
+        .cms-btn-md {
+            height: var(--cms-btn-height-md);
+            padding: 0 18px;
+            font-size: 14px;
+        }
+        .cms-btn-lg {
+            height: var(--cms-btn-height-lg);
+            padding: 0 24px;
+            font-size: 16px;
+        }
+        .cms-btn-icon {
+            width: var(--cms-btn-height-md);
+            height: var(--cms-btn-height-md);
+            padding: 0;
+            border-radius: 50%;
+        }
+
+        /* Variants styling */
+        .cms-btn-primary {
+            background-color: var(--cms-color-primary);
+            color: var(--cms-color-primary-text);
+            box-shadow: 0 4px 12px var(--cms-color-primary-shadow);
+        }
+        .cms-btn-primary:not(:disabled):hover {
+            background-color: var(--cms-color-primary-hover);
+            box-shadow: 0 6px 16px var(--cms-color-primary-shadow);
+        }
+        .cms-btn-primary:not(:disabled):active {
+            background-color: var(--cms-color-primary-active);
+        }
+
+        .cms-btn-secondary {
+            background-color: var(--cms-color-secondary);
+            color: var(--cms-color-secondary-text);
+            box-shadow: 0 4px 12px var(--cms-color-secondary-shadow);
+        }
+        .cms-btn-secondary:not(:disabled):hover {
+            background-color: var(--cms-color-secondary-hover);
+            box-shadow: 0 6px 16px var(--cms-color-secondary-shadow);
+        }
+        .cms-btn-secondary:not(:disabled):active {
+            background-color: var(--cms-color-secondary-active);
+        }
+
+        .cms-btn-success {
+            background-color: var(--cms-color-success);
+            color: var(--cms-color-success-text);
+            box-shadow: 0 4px 12px var(--cms-color-success-shadow);
+        }
+        .cms-btn-success:not(:disabled):hover {
+            background-color: var(--cms-color-success-hover);
+            box-shadow: 0 6px 16px var(--cms-color-success-shadow);
+        }
+        .cms-btn-success:not(:disabled):active {
+            background-color: var(--cms-color-success-active);
+        }
+
+        .cms-btn-danger {
+            background-color: var(--cms-color-danger);
+            color: var(--cms-color-danger-text);
+            box-shadow: 0 4px 12px var(--cms-color-danger-shadow);
+        }
+        .cms-btn-danger:not(:disabled):hover {
+            background-color: var(--cms-color-danger-hover);
+            box-shadow: 0 6px 16px var(--cms-color-danger-shadow);
+        }
+        .cms-btn-danger:not(:disabled):active {
+            background-color: var(--cms-color-danger-active);
+        }
+
+        .cms-btn-warning {
+            background-color: var(--cms-color-warning);
+            color: var(--cms-color-warning-text);
+            box-shadow: 0 4px 12px var(--cms-color-warning-shadow);
+        }
+        .cms-btn-warning:not(:disabled):hover {
+            background-color: var(--cms-color-warning-hover);
+            box-shadow: 0 6px 16px var(--cms-color-warning-shadow);
+        }
+        .cms-btn-warning:not(:disabled):active {
+            background-color: var(--cms-color-warning-active);
+        }
+
+        .cms-btn-ghost {
+            background-color: transparent;
+            color: var(--cms-color-ghost-text);
+            box-shadow: none;
+        }
+        .cms-btn-ghost:not(:disabled):hover {
+            background-color: var(--cms-color-ghost-hover);
+        }
+        .cms-btn-ghost:not(:disabled):active {
+            background-color: var(--cms-color-ghost-active);
+        }
+
+        .cms-btn-outline {
+            background-color: transparent;
+            border-color: var(--cms-color-outline-border);
+            color: var(--cms-color-outline-text);
+            box-shadow: none;
+        }
+        .cms-btn-outline:not(:disabled):hover {
+            background-color: var(--cms-color-outline-hover);
+            border-color: var(--cms-color-primary-hover);
+            color: var(--cms-color-primary-hover);
+        }
+        .cms-btn-outline:not(:disabled):active {
+            background-color: var(--cms-color-outline-active);
+        }
+
+        .cms-btn-link {
+            background-color: transparent;
+            color: var(--cms-color-link-text);
+            padding: 0;
+            height: auto;
+            box-shadow: none;
+            border-radius: 0;
+            text-decoration: underline;
+        }
+        .cms-btn-link:not(:disabled):hover {
+            color: var(--cms-color-link-hover-text);
+            transform: none !important;
+        }
     </style>
 
     <!-- مكتبات التشغيل -->
